@@ -216,7 +216,9 @@
   const quickSets = new WeakMap();
   const quickSet = (r) => { let s = quickSets.get(r); if (!s) { s = new Set(r.items || []); quickSets.set(r, s); } return s; };
   const roundTest = (r) => (isQuick(r) ? null : makeLocTest({ from: r.loc_from || "", to: r.loc_to || "" }));
+  const isShelf = (f, t) => /^[A-Z]+$/.test(f || "") && (!t || t === f);   // رف كامل بالحرف
   const rangeText = (r) => (isQuick(r) ? `جرد سريع · ${fmt((r.items || []).length)} صنف`
+    : isShelf(r.loc_from, r.loc_to) ? `رف ${r.loc_from} كامل`
     : r.loc_from || r.loc_to ? `${r.loc_from || "…"}${r.loc_to ? " → " + r.loc_to : "…"}` : "الفرع كامل");
   const roundTitle = (r) => r.name || `${branchLabel(r.branch)} · ${rangeText(r)}`;
   const STATUS_AR = { open: "جاري الجرد", review: "مراجعة الفروقات", closed: "مغلق" };
@@ -522,6 +524,9 @@
     if (!loc || (!loc.from && !loc.to)) return null;
     const from = cleanLoc(loc.from), to = cleanLoc(loc.to);
     const pf = parseLoc(from), pt = parseLoc(to);
+    // رف كامل بالحرف (A أو A → A): كل مواقع الرف، حتى اللي مكتوب فيها "A" بس بدون رقم
+    // (ومو "AB" — الحرف لازم يطابق بالضبط، عشان F ما تجيب FR)
+    if (/^[A-Z]+$/.test(from) && (!to || to === from)) return (L) => (cleanLoc(L).match(/^[A-Z]+/)?.[0] || "") === from;
     if (!to) return (L) => cleanLoc(L).startsWith(from);
     if (!from) return (L) => cleanLoc(L).startsWith(to);
     if (pf && pt) {
@@ -692,7 +697,7 @@
     $("#loc-btn").classList.toggle("on", li >= 0);
     if (li >= 0) {
       const p = state.pins[li];
-      lp.innerHTML = `<span class="lp-t" dir="ltr">${esc(p.from || "…")}${p.to ? ` → ${esc(p.to)}` : "…"}</span>
+      lp.innerHTML = `<span class="lp-t"${isShelf(p.from, p.to) ? "" : ' dir="ltr"'}>${isShelf(p.from, p.to) ? `رف ${esc(p.from)}` : `${esc(p.from || "…")}${p.to ? ` → ${esc(p.to)}` : "…"}`}</span>
         <button data-pin="${li}" aria-label="إلغاء النطاق">${X_ICON}</button>`;
     }
   }
@@ -746,30 +751,11 @@
 
   /* ---------- نطاق المواقع (من / إلى) ---------- */
   const locFrom = $("#loc-from"), locTo = $("#loc-to");
-  function locPrefixes() {
-    const g = new Map();
-    for (const it of state.branchItems) {
-      const raw = cleanLoc(effLoc(it)).match(/^[A-Z]+-?\d+/)?.[0];
-      const p = parseLoc(raw);
-      if (!p) continue;
-      const cur = g.get(p.p);
-      if (!cur) g.set(p.p, { p: p.p, min: p.n, minS: raw, max: p.n, maxS: raw, cnt: 1 });
-      else {
-        cur.cnt++;
-        if (p.n < cur.min) { cur.min = p.n; cur.minS = raw; }
-        if (p.n > cur.max) { cur.max = p.n; cur.maxS = raw; }
-      }
-    }
-    return [...g.values()].sort((a, b) => (a.p < b.p ? -1 : 1));
-  }
   $("#loc-btn").addEventListener("click", () => {
     searchEl.blur();
     const curLoc = state.pins.find((p) => p.type === "loc");
     locFrom.value = curLoc?.from || ""; locTo.value = curLoc?.to || "";
-    $("#loc-prefixes").innerHTML = locPrefixes().map((g) =>
-      `<button type="button" class="lp" data-from="${esc(g.minS)}" data-to="${esc(g.maxS)}">
-        <b>${esc(g.p)}</b><small dir="ltr">${esc(g.minS)} → ${esc(g.maxS)}</small><small>${fmt(g.cnt)} صنف</small></button>`).join("")
-      || `<p class="muted">لا توجد مواقع</p>`;
+    $("#loc-prefixes").innerHTML = shelfChips(locGroups(state.branchItems, effLoc)) || `<p class="muted">لا توجد مواقع</p>`;
     updateLocPreview();
     openOverlay("loc-backdrop");
     setTimeout(() => locFrom.focus(), 250);
@@ -809,11 +795,17 @@
   let rec = null;
   const micBtn = $("#mic-btn");
   function cleanSpeech(s) {
-    return s
+    return toEnDigits(s)
       .replace(/نقطتين|نقطتان/g, ":")
       .replace(/\s*(نقطه|نقطة)\s*/g, " .")
+      .replace(/\s*(شرطه|شرطة|داش)\s*/g, "-")
       .replace(/[؟?!،,]+/g, "")
+      // الجوال يقطّع الأرقام بمسافات ("90 919" / "9 0 9 1 9") — نرجّعها رقم واحد عشان البحث يلقاه
+      .replace(/(\d)\s+(?=\d)/g, "$1")
+      .replace(/(\d)\s*-\s*(?=\d)/g, "$1-")
+      .replace(/(^|\s)([A-Za-z])\s+(?=\d)/g, "$1$2")
       .replace(/\.\s*$/, "")
+      .replace(/\s+/g, " ")
       .trim();
   }
   micBtn.addEventListener("click", () => {
@@ -1296,10 +1288,7 @@
     const csv = countRows(rows, blind).map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
     download(name, "﻿" + csv, "text/csv;charset=utf-8");
   }
-  $("#export-btn").addEventListener("click", () => {
-    if (!state.round) return;
-    exportCSV(roundRows(state.round, true), `جرد-${roundTitle(state.round)}-${today()}.csv`.replace(/[\\/:*?"<>|]/g, "-"), isBlind());
-  });
+  // تصدير الجرد من شاشة الموظف انشال — المدير يسحبه من لوحة التحكم
 
   // ملف جرد (JSON) يرسله الموظف للمدير ليدمجه في جهازه
   function exportBackup(withUsers) {
@@ -1434,17 +1423,29 @@
 
   // ---- فتح / تعديل جرد ----
   let editingRound = null;
-  function locGroups(items) {
+  // الرفوف: لكل حرف أول وآخر موقع، وكم صنف موقعه الحرف بس (مثلاً "A" بدون رقم)
+  function locGroups(items, getLoc = (it) => it.loc) {
     const g = new Map();
     for (const it of items) {
-      const raw = cleanLoc(it.loc).match(/^[A-Z]+-?\d+/)?.[0];
-      const p = parseLoc(raw); if (!p) continue;
-      const cur = g.get(p.p);
-      if (!cur) g.set(p.p, { p: p.p, min: p.n, minS: raw, max: p.n, maxS: raw, cnt: 1 });
-      else { cur.cnt++; if (p.n < cur.min) { cur.min = p.n; cur.minS = raw; } if (p.n > cur.max) { cur.max = p.n; cur.maxS = raw; } }
+      const L = cleanLoc(getLoc(it));
+      const letter = L.match(/^[A-Z]+/)?.[0];
+      if (!letter) continue;
+      if (!g.has(letter)) g.set(letter, { p: letter, min: Infinity, minS: "", max: -Infinity, maxS: "", cnt: 0, plain: 0 });
+      const cur = g.get(letter);
+      cur.cnt++;
+      const raw = L.match(/^[A-Z]+-?\d+/)?.[0];
+      const p = parseLoc(raw);
+      if (!p) { cur.plain++; continue; }
+      if (p.n < cur.min) { cur.min = p.n; cur.minS = raw; }
+      if (p.n > cur.max) { cur.max = p.n; cur.maxS = raw; }
     }
     return [...g.values()].sort((a, b) => (a.p < b.p ? -1 : 1));
   }
+  // أزرار الرفوف: الضغط = الرف كامل (حتى المواقع اللي بدون رقم)
+  const shelfChips = (groups) => groups.map((g) =>
+    `<button type="button" class="lp" data-from="${esc(g.p)}" data-to="${esc(g.p)}"><b>${esc(g.p)}</b>` +
+    `<small dir="ltr">${g.minS ? `${esc(g.minS)} → ${esc(g.maxS)}` : "بدون أرقام"}</small>` +
+    `<small>${fmt(g.cnt)} صنف${g.plain ? ` · <i class="lp-plain">${fmt(g.plain)} بدون رقم</i>` : ""}</small></button>`).join("");
   const branchItemsOf = (bname) => { const bi = state.data.branches.indexOf(bname); return state.data.items.filter((it) => it.b === bi && !it.x && !it.gone); };
   function openRoundForm(r) {
     editingRound = r;
@@ -1467,9 +1468,7 @@
     if (CLOUD && !state.profiles) loadProfiles().then(() => { if (!$("#round-backdrop").hidden && editingRound === r) openRoundForm(r); });
   }
   function renderRoundPrefixes() {
-    $("#rd-prefixes").innerHTML = locGroups(branchItemsOf($("#rd-branch").value)).map((g) =>
-      `<button type="button" class="lp" data-from="${esc(g.minS)}" data-to="${esc(g.maxS)}"><b>${esc(g.p)}</b><small dir="ltr">${esc(g.minS)} → ${esc(g.maxS)}</small><small>${fmt(g.cnt)} صنف</small></button>`).join("")
-      || `<p class="muted">لا توجد مواقع</p>`;
+    $("#rd-prefixes").innerHTML = shelfChips(locGroups(branchItemsOf($("#rd-branch").value))) || `<p class="muted">لا توجد مواقع</p>`;
     updateRoundPreview();
   }
   function updateRoundPreview() {
@@ -1802,7 +1801,9 @@
     const bins = new Map();
     let noLoc = 0;
     for (const it of branchItemsOf(locsBranch)) {
-      const bin = cleanLoc(it.loc).match(/^[A-Z]+-?\d+/)?.[0];
+      // الموقع: B057 أو الحرف بس (A) لو مكتوب بدون رقم
+      const L = cleanLoc(it.loc);
+      const bin = L.match(/^[A-Z]+-?\d+/)?.[0] || L.match(/^[A-Z]+$/)?.[0];
       if (!bin) { noLoc++; continue; }
       bins.set(bin, (bins.get(bin) || 0) + 1);
     }
@@ -1814,7 +1815,7 @@
     };
     const groups = new Map();
     for (const [bin, n] of bins) {
-      const p = parseLoc(bin);
+      const p = parseLoc(bin) || { p: bin, n: -1 };          // -1 = الرف بدون رقم
       if (!groups.has(p.p)) groups.set(p.p, []);
       groups.get(p.p).push({ bin, n, num: p.n, ...info(bin) });
     }
@@ -1824,7 +1825,7 @@
       const c = { done: 0, prog: 0, left: 0 };
       list.forEach((x) => { c[x.st]++; tot[x.st]++; });
       return `<div class="loc-group"><div class="lg-head"><b>${esc(p)}</b><small>${fmt(list.length)} موقع · <span class="okc">تم ${fmt(c.done)}</span> · <span class="w">جاري ${fmt(c.prog)}</span> · باقي ${fmt(c.left)}</small></div>
-        <div class="lg-bins">${list.map((x) => `<button class="bin ${x.st}${locsSel === x.bin ? " sel" : ""}" data-bin="${esc(x.bin)}" title="${esc(x.bin)} · ${x.n} صنف">${esc(x.bin.replace(/^[A-Z]+-?/, ""))}</button>`).join("")}</div>
+        <div class="lg-bins">${list.map((x) => `<button class="bin ${x.st}${locsSel === x.bin ? " sel" : ""}" data-bin="${esc(x.bin)}" title="${esc(x.bin)} · ${x.n} صنف">${x.num < 0 ? "بدون رقم" : esc(x.bin.replace(/^[A-Z]+-?/, ""))}</button>`).join("")}</div>
         ${list.some((x) => x.bin === locsSel) ? binDetail(list.find((x) => x.bin === locsSel)) : ""}</div>`;
     }).join("");
     const all = tot.done + tot.prog + tot.left;
@@ -2264,7 +2265,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "17";
+  const APP_VER = "18";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 

@@ -320,7 +320,7 @@ mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: in
 .s-ico { color: var(--muted); width: 19px; height: 19px; }
 .clear-btn { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 99px; background: var(--line); }
 .clear-btn svg { width: 14px; height: 14px; }
-#loc-btn { color: var(--warn); background: var(--warn-bg); }
+#loc-btn { color: var(--warn); background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
 .mic-btn {
   width: 34px; height: 34px; border-radius: 99px; display: grid; place-items: center; flex-shrink: 0;
   color: var(--primary-2); background: color-mix(in srgb, var(--primary-2) 12%, transparent);
