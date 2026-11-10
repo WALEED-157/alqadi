@@ -9,8 +9,8 @@ window.DB = (() => {
   const on = !!(CFG.supabaseUrl && CFG.supabaseKey && window.supabase);
   const AUTH_KEY = "inv-auth";
   const sb = on ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, {
-    // lock بسيط: قفل المتصفح الافتراضي أحياناً يعلّق الطلبات للأبد على الجوال
-    auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_KEY, lock: async (_n, _t, fn) => fn() },
+    // القفل الافتراضي (navigator.locks) ضروري: يمنع تابين يجددون الجلسة بنفس الوقت ويطلع المستخدم
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_KEY },
   }) : null;
   // الجلسة موجودة على الجهاز؟ (لو انمسحت = لازم دخول من جديد، حتى لو الملف الشخصي محفوظ)
   const hasSession = () => { try { return !!localStorage.getItem(AUTH_KEY); } catch { return true; } };

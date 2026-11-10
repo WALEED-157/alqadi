@@ -1253,9 +1253,23 @@
   $$("#admin-tabs button").forEach((b) => b.addEventListener("click", () => { adminTab = b.dataset.tab; renderAdmin(); }));
 
   // soft = تحديث من المزامنة: ما نرسم وفيه نافذة مفتوحة أو المستخدم يتعامل مع الصفحة
+  // آخر مرة المدير لمس أو كتب في لوحة التحكم
+  let adminTouchAt = 0;
+  ["pointerdown", "keydown", "input", "wheel", "scroll"].forEach((ev) =>
+    $("#screen-admin").addEventListener(ev, () => { adminTouchAt = Date.now(); }, { capture: true, passive: true }));
   function renderAdmin(soft) {
-    if (soft && $$(".sheet-backdrop:not([hidden])").length) return;
-    if (soft && adminTab !== "rounds" && adminTab !== "locs") return;
+    if (soft) {
+      // تحديث تلقائي من المزامنة: ما نعيد الرسم والمدير شغّال (يكتب، فاتح نافذة، أو لمس الصفحة قبل شوي)
+      if ($$(".sheet-backdrop:not([hidden])").length) return;
+      if (adminTab !== "rounds" && adminTab !== "locs") return;
+      if (Date.now() - adminTouchAt < 20000) { clearTimeout(renderAdmin.t); renderAdmin.t = setTimeout(() => renderAdmin(true), 20000); return; }
+      const a = document.activeElement;
+      if (a && $("#screen-admin").contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName)) return;
+      const y = window.scrollY;
+      renderAdmin(false);
+      window.scrollTo(0, y);
+      return;
+    }
     $$("#admin-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === adminTab));
     ["rounds", "locs", "users", "data"].forEach((t) => ($("#tab-" + t).hidden = t !== adminTab));
     if (adminTab === "rounds") renderRoundsAdmin();
@@ -2188,7 +2202,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "11";
+  const APP_VER = "12";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
 
   /* ---------- الوضع النهاري / الليلي ---------- */
