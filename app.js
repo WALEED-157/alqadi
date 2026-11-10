@@ -11,8 +11,10 @@
   const LS_USERS = "inv_users_v1";
   const CLOUD = window.DB.on;          // مربوط بـ Supabase؟
   // نسخة السحابة لها مفاتيح منفصلة عشان ما يختلط فيها جرد التجربة المحلي
-  const LS_COUNTS = CLOUD ? "inv_counts_cloud_v1" : "inv_counts_v1";
-  const LS_EXTRAS = CLOUD ? "inv_extras_cloud_v1" : "inv_extras_v1";   // أصناف زائدة لقيناها بالجرد وما هي بالنظام
+  // v2: الجرد صار مربوط بجولة (موقع/نطاق مواقع) — المفتاح: "رقم الجولة|رقم الصنف"
+  const LS_COUNTS = CLOUD ? "inv_counts_cloud_v2" : "inv_counts_v2";
+  const LS_EXTRAS = CLOUD ? "inv_extras_cloud_v2" : "inv_extras_v2";   // أصناف زائدة لقيناها بالجرد وما هي بالنظام
+  const LS_ROUNDS = CLOUD ? "inv_rounds_cloud_v1" : "inv_rounds_v1";
   const PAGE = 80;
 
   /* ---------- التخزين ---------- */
@@ -40,6 +42,9 @@
     user: store.get(LS_USER, null),
     data: null,          // { branches, items[] }
     counts: loadedCounts,
+    rounds: store.get(LS_ROUNDS, {}),   // جولات الجرد: id → {id, branch, loc_from, loc_to, name, users, status, ...}
+    round: null,         // الجولة المفتوحة في شاشة الجرد
+    branchAll: [],       // كل أصناف الفرع (للبحث عن صنف بموقع ثاني)
     branch: null,        // index
     branchItems: [],
     filtered: [],
@@ -51,6 +56,7 @@
     profiles: null,      // قائمة المستخدمين من السيرفر (للمدير)
   };
   const saveCounts = () => store.set(LS_COUNTS, state.counts);
+  const saveRounds = () => store.set(LS_ROUNDS, state.rounds);
 
   /* ---------- أدوات النص ---------- */
   const AR_DIAC = /[ً-ْـٰ]/g;
@@ -99,26 +105,24 @@
   }
   // المخزون تغيّر على السيرفر (المدير رفع تحديث) — نعيد التحميل بدون ما نخرب الشاشة
   async function reloadItems() {
-    const bname = state.branch != null ? state.data?.branches[state.branch] : null;
     await loadData(true);
-    state.branch = null;
-    if (state.screen === "inventory" && bname != null) {
-      const bi = state.data.branches.indexOf(bname);
-      if (bi >= 0) { state.branch = bi; state.branchItems = scopedItems(bi); applyFilter(); }
-    } else if (state.screen === "branches") renderBranches();
+    if (state.screen === "inventory" && state.round) {
+      const bi = state.data.branches.indexOf(state.round.branch);
+      if (bi >= 0) { state.branch = bi; setRoundItems(); applyFilter(); }
+    } else if (state.screen === "branches") renderRounds();
     else if (state.screen === "admin") renderAdmin();
   }
 
   /* ---------- الأصناف الزائدة (موجودة فعلياً وغير موجودة بالنظام) ---------- */
-  // extras["فرع|رقم"] = { b: اسم الفرع, n, name, loc, by, u, at }
+  // extras["جولة|رقم"] = { r: رقم الجولة, b: اسم الفرع, n, name, loc, by, u, at }
   function addExtraItem(x) {
     const { branches, items } = state.data;
     const bi = branches.indexOf(x.b);
     if (bi < 0 || !x.n) return null;
-    const ex = items.find((it) => it.b === bi && it.n === x.n);
+    const ex = items.find((it) => it.b === bi && it.n === x.n && (!it.x || it.xr === x.r));
     if (ex) return ex;
     const it = {
-      i: items.length, n: x.n, name: x.name || "", b: bi, q: 0, r: 0, loc: x.loc || "", c: "", x: true,
+      i: items.length, n: x.n, name: x.name || "", b: bi, q: 0, r: 0, loc: x.loc || "", c: "", x: true, xr: x.r,
       nn: norm(x.n), nk: numKey(x.n), nm: norm(x.name || ""),
     };
     items.push(it);
@@ -133,19 +137,27 @@
     if (rec?.synced) pushExtra(it, rec, true);
     it.gone = true;
     state.branchItems = state.branchItems.filter((x) => x !== it);
+    state.branchAll = state.branchAll.filter((x) => x !== it);
   }
 
   /* ---------- الرفع للسيرفر (يتجمع بالطابور لو ما فيه نت) ---------- */
   const bOf = (it) => state.data.branches[it.b];
   const iso = (t) => new Date(t || Date.now()).toISOString();
+  const rid = () => state.round?.id;
   function pushEntry(it, e) {
-    window.DB.queue({ t: "entry", row: { id: e.id, branch: bOf(it), n: it.n, qty: e.qty, user_id: e.u, by_name: e.by || "", at: iso(e.at) } });
+    window.DB.queue({ t: "entry", row: { id: e.id, round_id: rid(), branch: bOf(it), n: it.n, qty: e.qty, user_id: e.u, by_name: e.by || "", at: iso(e.at), kind: e.kind || "count" } });
   }
   const pushDel = (id) => window.DB.queue({ t: "del", id });
-  const pushMeta = (it, c) => window.DB.queue({ t: "meta", row: { branch: bOf(it), n: it.n, loc: c?.loc ?? null, note: c?.note || null } });
+  const pushMeta = (it, c) => window.DB.queue({ t: "meta", row: {
+    round_id: rid(), branch: bOf(it), n: it.n, loc: c?.loc ?? null, note: c?.note || null,
+    verified_by: c?.ver?.u ?? null, verified_name: c?.ver?.by ?? null, verified_at: c?.ver ? iso(c.ver.at) : null } });
   function pushExtra(it, rec, deleted = false) {
-    window.DB.queue({ t: "extra", row: { branch: bOf(it), n: it.n, name: it.name || "", loc: it.loc || "", by_name: rec?.by || "", at: iso(rec?.at), deleted } });
+    window.DB.queue({ t: "extra", row: { round_id: rid(), branch: bOf(it), n: it.n, name: it.name || "", loc: it.loc || "", by_name: rec?.by || "", at: iso(rec?.at), deleted } });
   }
+  const pushRound = (r) => window.DB.queue({ t: "round", row: {
+    id: r.id, branch: r.branch, loc_from: r.loc_from || "", loc_to: r.loc_to || "", name: r.name || "", users: r.users || [],
+    status: r.status, created_at: r.created_at, review_at: r.review_at || null, closed_at: r.closed_at || null,
+    summary: r.summary || null, deleted: !!r.deleted } });
   // أول جرد لصنف زائد = نرفعه للسيرفر عشان يطلع للكل
   function commitExtra(it) {
     if (!it.x) return;
@@ -156,8 +168,9 @@
     store.set(LS_EXTRAS, ex);
     pushExtra(it, rec);
   }
-  const keyOf = (it) => `${state.data.branches[it.b]}|${it.n}`;
+  const keyOf = (it) => `${rid()}|${it.n}`;
   const countOf = (it) => state.counts[keyOf(it)];
+  const countIn = (r, it) => state.counts[`${r.id}|${it.n}`];
   const effLoc = (it) => countOf(it)?.loc ?? it.loc;
   // المحجوز = الزبون أخذه وما صدرت فاتورته — داخل في المتوفر لكنه مو بالرف
   // الجرد النهائي = اللي بالرف + المحجوز، والفرق = النهائي − المتوفر
@@ -196,11 +209,34 @@
     if (tests.some((t) => !t)) return { ok: true, test: null };   // قاعدة بدون موقع = الفرع كامل
     return { ok: true, test: (L) => tests.some((t) => t(L)) };
   }
-  function scopedItems(bi) {
-    const sc = scopeFor(state.data.branches[bi]);
-    if (!sc.ok) return [];
-    const its = state.data.items.filter((x) => x.b === bi && !x.gone);
-    return sc.test ? its.filter((it) => it.x || sc.test(it.loc || "") || sc.test(effLoc(it) || "")) : its;
+  /* ---------- جولات الجرد ---------- */
+  // جولة = فرع + نطاق مواقع. الموظف يشوف أصناف النطاق بس، والبحث يشمل الفرع كامل
+  const roundTest = (r) => makeLocTest({ from: r.loc_from || "", to: r.loc_to || "" });
+  const rangeText = (r) => (r.loc_from || r.loc_to ? `${r.loc_from || "…"}${r.loc_to ? " → " + r.loc_to : "…"}` : "الفرع كامل");
+  const roundTitle = (r) => r.name || `${branchLabel(r.branch)} · ${rangeText(r)}`;
+  const STATUS_AR = { open: "جاري الجرد", review: "مراجعة الفروقات", closed: "مغلق" };
+  function inRange(r, it, t = roundTest(r)) { return !t || t(it.loc || ""); }
+  // أصناف الجولة: اللي موقعها بالنظام داخل النطاق + اللي انجردت فيها (من موقع ثاني) + الزائدة
+  function roundItemsOf(r) {
+    if (!state.data) return [];
+    const bi = state.data.branches.indexOf(r.branch);
+    if (bi < 0) return [];
+    const t = roundTest(r);
+    return state.data.items.filter((it) => it.b === bi && !it.gone &&
+      (it.x ? it.xr === r.id : (inRange(r, it, t) || !!countIn(r, it))));
+  }
+  function setRoundItems() {
+    const r = state.round, bi = state.branch;
+    state.branchItems = roundItemsOf(r);
+    state.inRound = new Set(state.branchItems);
+    state.branchAll = state.data.items.filter((it) => it.b === bi && !it.gone && (!it.x || it.xr === r.id));
+  }
+  // الجولات اللي يشوفها المستخدم
+  function myRounds() {
+    const u = me();
+    return Object.values(state.rounds).filter((r) => !r.deleted && r.status !== "closed" &&
+      (isAdmin() || (scopeFor(r.branch).ok && (!r.users?.length || r.users.includes(myId())))))
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   }
 
   /* ---------- التنقل (بدون سجل متصفح — زر الرجوع لا يخرج من التطبيق) ---------- */
@@ -238,13 +274,14 @@
       }
       if (state.data) $("#toast").hidden = true;
     }
-    if (h === "branches") { renderBranches(); return show("branches"); }
+    if (h === "branches") { renderRounds(); return show("branches"); }
     if (h === "admin" && u.role === "admin") { renderAdmin(); return show("admin"); }
-    const m = h.match(/^inv\/(\d+)$/);
-    if (m && scopeFor(state.data.branches[+m[1]] ?? "").ok && state.data.branches[+m[1]] != null) {
-      openBranch(+m[1]); return show("inventory");
+    const m = h.match(/^inv\/([\w-]+)$/);
+    const r = m && state.rounds[m[1]];
+    if (r && myRounds().includes(r) && state.data.branches.includes(r.branch)) {
+      openRound(r); return show("inventory");
     }
-    go("home");
+    go(m ? "branches" : "home");
   }
 
   // حارس زر الرجوع: نضيف خطوة وهمية في السجل، وأي ضغطة رجوع ترجعنا داخل التطبيق
@@ -317,7 +354,10 @@
           : err.message === "net" ? "ما فيه اتصال بالإنترنت" : "تعذّر الدخول: " + err.message);
         return;
       } finally { btn.disabled = false; }
-      startSync();
+      // إعادة تحميل مرة وحدة بعد الدخول: بعض الطلبات ما تاخذ الجلسة الجديدة إلا بعد التحديث
+      location.replace(location.pathname + "#home");
+      location.reload();
+      return;
     } else {
       const found = allUsers().find((x) => x.username.toLowerCase() === u && x.password === p && x.active !== false);
       if (!found) { loginErr("اسم المستخدم أو كلمة المرور غير صحيحة"); return; }
@@ -346,41 +386,70 @@
   $$("[data-back]").forEach((b) => b.addEventListener("click", () => go(b.dataset.back)));
 
   /* ---------- الفروع ---------- */
-  function renderBranches() {
-    const { branches } = state.data;
-    const order = [...branches.keys()]
-      .filter((bi) => scopeFor(branches[bi]).ok)
-      .sort((a, b) => {
-        const ia = CFG.branchOrder.indexOf(branches[a]), ib = CFG.branchOrder.indexOf(branches[b]);
-        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-      });
-    $("#branch-list").innerHTML = order.length ? order.map((bi) => {
-      const its = scopedItems(bi);
-      const done = its.filter((x) => countOf(x)).length;
-      const pct = its.length ? Math.round((done / its.length) * 100) : 0;
-      return `<button class="branch-card" data-b="${bi}">
-        <span class="bc-icon"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg></span>
-        <span><strong>${esc(branchLabel(branches[bi]))}</strong><small>${fmt(its.length)} صنف · تم جرد ${fmt(done)}</small></span>
-        <span class="bc-pct">${pct}%</span>
-        <span class="bc-bar"><span style="width:${pct}%"></span></span>
+  // تقدّم الجولة: كم صنف بالنطاق انجرد، والفروقات
+  function roundProgress(r) {
+    const its = roundItemsOf(r);
+    let done = 0, diff = 0, review = 0, verified = 0, extra = 0;
+    for (const it of its) {
+      const c = countIn(r, it);
+      if (it.x) extra++;
+      if (c) { done++; if (diffOf(it, c)) diff++; }
+      if (needsReview(it, c)) review++;
+      if (c?.ver) verified++;
+    }
+    return { total: its.length, done, diff, review, verified, extra, pct: its.length ? Math.round((done / its.length) * 100) : 0 };
+  }
+  function renderRounds() {
+    const list = myRounds();
+    $("#branch-list").innerHTML = list.length ? list.map((r) => {
+      const p = roundProgress(r);
+      const rv = r.status === "review";
+      return `<button class="branch-card round-card${rv ? " rv" : ""}" data-r="${esc(r.id)}">
+        <span class="bc-icon"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+        <span><strong>${esc(r.name || branchLabel(r.branch))}</strong>
+          <small>${esc(branchLabel(r.branch))} · <b dir="ltr">${esc(rangeText(r))}</b></small>
+          <small>${rv ? `<i class="badge b2">مراجعة الفروقات</i> باقي ${fmt(p.review)}` : `${fmt(p.total)} صنف · تم ${fmt(p.done)}`}</small></span>
+        <span class="bc-pct">${rv ? fmt(p.review) : p.pct + "%"}</span>
+        <span class="bc-bar"><span style="width:${rv ? Math.round(((p.total - p.review) / Math.max(1, p.total)) * 100) : p.pct}%"></span></span>
       </button>`;
-    }).join("") : `<div class="empty"><p>ما عندك فروع مخصصة — راجع المدير</p></div>`;
-    $$("#branch-list .branch-card").forEach((c) => c.addEventListener("click", () => go("inv/" + c.dataset.b)));
+    }).join("") : `<div class="empty"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <p>ما فيه جرد مفتوح لك حالياً</p><p class="muted">المدير يفتح الجرد من لوحة التحكم ← الجرد</p></div>`;
+    $$("#branch-list .round-card").forEach((c) => c.addEventListener("click", () => go("inv/" + c.dataset.r)));
   }
 
   /* ---------- شاشة الجرد ---------- */
-  function openBranch(bi) {
-    if (state.branch !== bi) {
-      state.branch = bi;
-      state.status = "todo";
+  function openRound(r) {
+    const review = r.status === "review";
+    const mode = review ? "review" : "open";
+    if (state.round?.id !== r.id || state.mode !== mode) {
+      state.status = review ? "review" : "todo";
       state.pins = [];
       $("#search").value = "";
-      $$("#status-chips .chip").forEach((c) => c.classList.toggle("active", c.dataset.f === "todo"));
     }
-    state.branchItems = scopedItems(bi);
-    $("#inv-branch").textContent = branchLabel(state.data.branches[bi]);
+    state.round = r;
+    state.mode = mode;
+    state.branch = state.data.branches.indexOf(r.branch);
+    setRoundItems();
+    renderChips();
+    $("#inv-branch").textContent = r.name || branchLabel(r.branch);
+    $("#inv-tb-label").textContent = review ? "مراجعة الفروقات" : rangeText(r);
+    document.body.classList.toggle("review", review);
     renderPins();
     applyFilter();
+  }
+  // الفلاتر تتغير حسب المرحلة
+  const CHIPS = {
+    open: [["todo", "لم يُجرد"], ["done", "تم"], ["diff", "فيه فرق"], ["extra", "زائد"], ["all", "الكل"]],
+    review: [["review", "للمراجعة"], ["verified", "تم التأكيد"], ["all", "الكل"]],
+  };
+  function renderChips() {
+    $("#status-chips").innerHTML = CHIPS[state.mode].map(([f, t]) =>
+      `<button class="chip${state.status === f ? " active" : ""}" data-f="${f}">${t}</button>`).join("");
+  }
+  // يحتاج مراجعة: فيه فرق (أو ما انجرد والمفروض موجود) وما أحد أكده
+  function needsReview(it, c) {
+    if (c?.ver) return false;
+    return (c ? c.qty : 0) + resv(it) - it.q !== 0;
   }
 
   /* ===== محرك البحث =====
@@ -445,14 +514,19 @@
       case "extra": return !!it.x;
       case "done": return !!c;
       case "diff": return !!c && diffOf(it, c) !== 0;
+      case "review": return searching || needsReview(it, c);
+      case "verified": return !!c?.ver;
       default: return true;
     }
   }
 
   function applyFilter() {
+    if (!state.round) return;
     const { locTests, textTests, preview } = buildFilters();
     const searching = textTests.some(Boolean);
-    let list = state.branchItems.filter((it) => {
+    // البحث يشمل الفرع كامل: صنف موقعه بالنظام غلط أو بدون موقع يقدر يلقاه ويجرده
+    const base = searching ? state.branchAll : state.branchItems;
+    let list = base.filter((it) => {
       if (!statusOk(it, searching)) return false;
       if (locTests.length) { const L = effLoc(it) || ""; if (!locTests.every((f) => f(L))) return false; }
       return textTests.every((t) => matchText(it, t));
@@ -472,7 +546,9 @@
     $("#empty").hidden = list.length > 0;
     const q = $("#search").value.trim();
     $("#empty-add").hidden = !searching;
-    $("#empty-msg").textContent = searching ? "الصنف غير موجود في مخزون الفرع" : state.status === "todo" ? "تم جرد كل الأصناف هنا ✓" : "لا توجد نتائج";
+    $("#empty-msg").textContent = searching ? "الصنف غير موجود في مخزون الفرع"
+      : state.status === "todo" ? "تم جرد كل أصناف هذا النطاق ✓"
+      : state.status === "review" ? "ما فيه فروقات للمراجعة ✓" : "لا توجد نتائج";
     $("#empty-add").dataset.q = /^[\s.]*$/.test(q) ? "" : q.replace(/^\./, "");
     const total = state.branchItems.length;
     $("#result-count").textContent =
@@ -486,8 +562,11 @@
     const L = effLoc(it);
     const diff = c && diffOf(it, c) !== 0;
     const multi = c && c.entries.length > 1;
-    return `<div class="trow${c ? " done" : ""}" data-i="${it.i}">
-      <span class="t-item"><span class="t-num">${esc(it.n)}${it.x ? '<i class="xb">زائد</i>' : ""}</span><span class="t-name">${esc(it.name)}</span></span>
+    const out = !it.x && !inRange(state.round, it);          // موقعه بالنظام خارج نطاق الجولة
+    const rv = state.mode === "review";
+    const cls = c?.ver ? " done ver" : rv && needsReview(it, c) ? " rv" : c ? " done" : "";
+    return `<div class="trow${cls}" data-i="${it.i}">
+      <span class="t-item"><span class="t-num">${esc(it.n)}${it.x ? '<i class="xb">زائد</i>' : ""}${out ? '<i class="xb ob">خارج النطاق</i>' : ""}${c?.ver ? '<i class="xb vb">✓ مؤكد</i>' : ""}</span><span class="t-name">${esc(it.name)}</span></span>
       <span class="t-loc${c && (L || "") !== (it.loc || "") ? " changed" : ""}">${esc(L || "—")}</span>
       <span class="t-q"><span class="sys">${fmt(it.q)}</span>${resv(it) ? `<span class="rsv">محجوز ${fmt(resv(it))}</span>` : ""}${c ?`<span class="cnt${diff ? " d" : ""}">${multi ? "Σ " : "جرد "}${fmt(c.qty)}</span>` : ""}</span>
       <button class="edit-btn" aria-label="تعديل">${c
@@ -507,6 +586,12 @@
 
   function updateProgress() {
     const total = state.branchItems.length;
+    if (state.mode === "review") {
+      const left = state.branchItems.filter((x) => needsReview(x, countOf(x))).length;
+      $("#inv-progress-bar").style.width = total ? ((total - left) / total) * 100 + "%" : "0";
+      $("#inv-progress-text").textContent = `باقي ${fmt(left)}`;
+      return;
+    }
     const done = state.branchItems.filter((x) => countOf(x)).length;
     $("#inv-progress-bar").style.width = total ? (done / total) * 100 + "%" : "0";
     $("#inv-progress-text").textContent = `${fmt(done)}/${fmt(total)}`;
@@ -590,11 +675,12 @@
     $("#search-clear").hidden = !searchEl.value;
   }
 
-  $$("#status-chips .chip").forEach((c) => c.addEventListener("click", () => {
+  $("#status-chips").addEventListener("click", (e) => {
+    const c = e.target.closest(".chip"); if (!c) return;
     state.status = c.dataset.f;
     $$("#status-chips .chip").forEach((x) => x.classList.toggle("active", x === c));
     applyFilter();
-  }));
+  });
 
   $("#cam-btn").addEventListener("click", () => toast("مسح الباركود: بانتظار قاعدة الباركود"));
 
@@ -732,31 +818,42 @@
     rn.hidden = !resv(it) || isBlind();
     rn.textContent = `المحجوز عند الزبون (مو بالرف) — المفروض بالرف: ${fmt(it.q - resv(it))}، ونضيف المحجوز على جردك`;
     $("#sh-loc0").textContent = it.loc || "—";
+    // صنف موقعه بالنظام خارج نطاق الجولة (أو بدون موقع): ينجرد هنا ونعدّل موقعه
+    const out = !it.x && !inRange(state.round, it);
+    const on = $("#sh-onote");
+    on.hidden = !out && !!it.loc;
+    on.textContent = !it.loc ? "هذا الصنف بدون موقع بالنظام — اكتب الموقع اللي لقيته فيه"
+      : `موقعه بالنظام ${it.loc} (خارج نطاق هذا الجرد) — اكتب الموقع اللي لقيته فيه`;
     cnt.value = "";
-    cnt.placeholder = "0";
-    $("#sh-loc").value = effLoc(it) || "";
+    const rv = state.mode === "review";
+    cnt.placeholder = rv ? "كم بالرف؟" : "0";
+    $("#sh-loc").value = out && !c ? "" : effLoc(it) || "";
     $("#sh-note").value = c?.note || "";
     $("#sh-reset").hidden = !(c && isAdmin());
+    $("#sh-verify").hidden = !rv || !c || !!c.ver;
     renderEntries();
     updateDiff();
     openOverlay("sheet-backdrop");
-    setTimeout(() => cnt.focus(), 250);
+    setTimeout(() => ((out || !it.loc) && !c && !rv ? $("#sh-loc") : cnt).focus(), 250);
   }
   const closeSheet = () => closeOverlay("sheet-backdrop");
 
   function renderEntries() {
     const it = state.editing; const c = countOf(it);
     const box = $("#sh-entries");
-    $("#sh-count-label").textContent = c ? "إضافة كمية (تُجمع مع الجرد السابق)" : "كمية الجرد";
+    const rv = state.mode === "review";
+    $("#sh-count-label").textContent = rv ? "العد الثاني: كم لقيت بالرف؟ (المجموع الكامل)"
+      : c ? "إضافة كمية (تُجمع مع الجرد السابق)" : "كمية الجرد";
     if (!c) { box.hidden = true; return; }
-    const u = me();
     box.hidden = false;
     box.innerHTML = `<div class="ent-head"><span>الجرد السابق</span><b>المجموع ${fmt(c.qty)}</b></div>` +
       c.entries.map((e, i) => {
-        const canDel = isAdmin() || (e.u && e.u === myId());
-        return `<div class="ent"><b>${fmt(e.qty)}</b><span>${esc(e.by || "—")} · ${fmtTime(e.at)}</span>${
+        const canDel = !rv && (isAdmin() || (e.u && e.u === myId()));
+        const fix = e.kind === "fix";
+        return `<div class="ent${fix ? " fix" : ""}"><b>${fix && e.qty > 0 ? "+" : ""}${fmt(e.qty)}</b><span>${fix ? "تصحيح · " : ""}${esc(e.by || "—")} · ${fmtTime(e.at)}</span>${
           canDel ? `<button type="button" data-ent="${i}" aria-label="حذف هذا الإدخال"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ""}</div>`;
-      }).join("");
+      }).join("") +
+      (c.ver ? `<div class="ent ver"><b>✓</b><span>أكّده ${esc(c.ver.by || "")} · ${fmtTime(c.ver.at)}</span></div>` : "");
   }
   $("#sh-entries").addEventListener("click", (e) => {
     const b = e.target.closest("[data-ent]"); if (!b) return;
@@ -780,6 +877,16 @@
     const hasPrev = !!countOf(it);
     const r = resv(it);
     const withR = (shelf) => (r ? `بالرف ${fmt(shelf)} + محجوز ${fmt(r)} = ${fmt(shelf + r)} · ` : "");
+    if (state.mode === "review") {
+      // المراجعة: الرقم المكتوب = المجموع الصحيح بالرف (مو إضافة)
+      const shelf = cnt.value === "" ? prev : +cnt.value;
+      const d = shelf + r - it.q;
+      const chg = cnt.value !== "" && shelf !== prev ? `تعديل ${fmt(prev)} ← ${fmt(shelf)} · ` : "";
+      if (isBlind()) { el.textContent = chg || (d ? "فيه فرق — أعد العد بدقة" : ""); el.className = "diff" + (d ? " bad" : ""); return; }
+      el.textContent = chg + withR(shelf) + diffText(d);
+      el.className = "diff " + (d === 0 ? "ok" : "bad");
+      return;
+    }
     if (cnt.value === "") {
       const d0 = prev + r - it.q;
       el.textContent = hasPrev && !isBlind() ? withR(prev) + diffText(d0) : "";
@@ -810,6 +917,9 @@
     const v = toEnDigits(cnt.value).trim();
     const loc = cleanLoc($("#sh-loc").value) || $("#sh-loc").value.trim();
     const note = $("#sh-note").value.trim();
+    if (state.mode === "review") return saveReview(it, key, c, v, loc, note);
+    const out = !it.x && !inRange(state.round, it);
+    if (out && !c && v !== "" && !loc) { $("#sh-loc").focus(); toast("اكتب الموقع اللي لقيت فيه الصنف"); return; }
     if (v === "") {
       if (!c) { cnt.focus(); toast("اكتب كمية الجرد"); return; }
       c.loc = loc; c.note = note;            // تعديل الموقع/الملاحظة فقط
@@ -824,12 +934,42 @@
     }
     const cc = state.counts[key];
     if (!c || c.loc !== it.loc || note || v === "") pushMeta(it, cc);
+    // صنف من موقع ثاني انجرد هنا = صار من أصناف هذا الجرد
+    if (!state.branchItems.includes(it)) state.branchItems.push(it);
     saveCounts();
     refreshRow(it);
     closeSheet();
     navigator.vibrate?.(30);
     toast(c && v !== "" ? `✓ أُضيفت — المجموع ${fmt(state.counts[key].qty)}` : "✓ تم حفظ الجرد");
   }
+  // المراجعة: العد الثاني يصحّح المجموع (إدخال "تصحيح" بالفرق) ويأكّد الصنف
+  function saveReview(it, key, c, v, loc, note) {
+    const prev = c?.qty || 0;
+    if (v === "" && !c) { cnt.focus(); toast("اكتب كم لقيت بالرف (ولو صفر)"); return; }
+    if (v !== "" && (!Number.isFinite(+v) || +v < 0)) { cnt.focus(); toast("كمية غير صحيحة"); return; }
+    const total = v === "" ? prev : +v;
+    const u = me();
+    const now = Date.now();
+    let cc = c;
+    if (!c || total !== prev) {
+      const entry = { id: window.DB.uuid(), qty: total - prev, by: u?.name, u: myId(), at: now, kind: "fix" };
+      commitExtra(it);
+      if (c) c.entries.push(entry);
+      else cc = state.counts[key] = { entries: [entry], loc, note };
+      normCount(cc);
+      pushEntry(it, entry);
+    }
+    cc.loc = loc; cc.note = note;
+    cc.ver = { by: u?.name, u: myId(), at: now };
+    pushMeta(it, cc);
+    if (!state.branchItems.includes(it)) state.branchItems.push(it);
+    saveCounts();
+    refreshRow(it);
+    closeSheet();
+    navigator.vibrate?.(30);
+    toast(total !== prev ? `✓ تم التصحيح ${fmt(prev)} ← ${fmt(total)} والتأكيد` : "✓ تم التأكيد");
+  }
+  $("#sh-verify").addEventListener("click", () => { cnt.value = ""; save(); });
   $("#sh-save").addEventListener("click", save);
   $("#sh-reset").addEventListener("click", () => {
     const it = state.editing; if (!it) return;
@@ -860,8 +1000,8 @@
   $("#extra-btn").addEventListener("click", () => openExtra(""));
   let suggT, suggSeq = 0;
   function xLookup() {
-    const n = toEnDigits(xNum.value).trim().toUpperCase().replace(/\s+/g, "");
-    const hit = n && state.data.items.find((it) => it.b === state.branch && !it.gone && it.n.toUpperCase() === n);
+    const n = toEnDigits(xNum.value).trim().toUpperCase().replace(/\s+/g, " ");
+    const hit = n && state.branchAll.find((it) => it.n.toUpperCase() === n);
     $("#x-hint").textContent = hit ? `موجود بالفرع: ${hit.name || ""} — المتابعة تفتحه للجرد` : "";
     // البحث في الدليل الكامل (يحتاج إنترنت)
     clearTimeout(suggT);
@@ -885,19 +1025,20 @@
     xLookup();
   });
   $("#x-go").addEventListener("click", () => {
-    const n = toEnDigits(xNum.value).trim().toUpperCase().replace(/\s+/g, "");
+    const n = toEnDigits(xNum.value).trim().toUpperCase().replace(/\s+/g, " ");
     if (!n) { xNum.focus(); toast("اكتب رقم الصنف"); return; }
     const bname = state.data.branches[state.branch];
-    let it = state.data.items.find((x) => x.b === state.branch && !x.gone && x.n.toUpperCase() === n);
+    let it = state.branchAll.find((x) => x.n.toUpperCase() === n);
     if (!it) {
       const u = me();
-      const rec = { b: bname, n, name: $("#x-name").value.trim(), loc: cleanLoc($("#x-loc").value), by: u?.name, u: myId(), at: Date.now() };
+      const rec = { r: rid(), b: bname, n, name: $("#x-name").value.trim(), loc: cleanLoc($("#x-loc").value), by: u?.name, u: myId(), at: Date.now() };
       const ex = store.get(LS_EXTRAS, {});
-      ex[`${bname}|${n}`] = rec;
+      ex[`${rid()}|${n}`] = rec;
       store.set(LS_EXTRAS, ex);
       it = addExtraItem(rec);
       it.gone = false;
-      if (!state.branchItems.includes(it)) state.branchItems.push(it);
+      if (!state.branchItems.includes(it)) { state.branchItems.push(it); state.inRound.add(it); }
+      if (!state.branchAll.includes(it)) state.branchAll.push(it);
     }
     closeOverlay("extra-backdrop");
     openSheet(it);
@@ -916,9 +1057,18 @@
   /* ---------- المزامنة: نطبّق جرد الموظفين الثانيين ---------- */
   function applyChanges(ch) {
     const touched = new Set();
-    let extrasChanged = false;
-    for (const [id, branch, n, qty, uid, by, at, deleted] of ch.entries) {
-      const key = `${branch}|${n}`;
+    let extrasChanged = false, roundsChanged = false;
+    // الجولات (يفتحها ويغيّر مرحلتها المدير)
+    for (const r of ch.rounds || []) {
+      const old = state.rounds[r.id];
+      state.rounds[r.id] = { ...old, ...r };
+      if (!old || old.status !== r.status || old.deleted !== r.deleted || old.loc_from !== r.loc_from || old.loc_to !== r.loc_to
+        || JSON.stringify(old.users) !== JSON.stringify(r.users)) roundsChanged = true;
+    }
+    if ((ch.rounds || []).length) saveRounds();
+    for (const [id, branch, n, qty, uid, by, at, deleted, round, kind] of ch.entries) {
+      if (!round) continue;
+      const key = `${round}|${n}`;
       let c = state.counts[key];
       if (deleted) {
         const i = c ? c.entries.findIndex((e) => e.id === id) : -1;
@@ -931,30 +1081,33 @@
       if (!c) c = state.counts[key] = { entries: [], note: "" };
       const ex = c.entries.find((e) => e.id === id);
       if (ex) { if (ex.qty !== +qty) { ex.qty = +qty; normCount(c); touched.add(key); } continue; }
-      c.entries.push({ id, qty: +qty, by, u: uid, at: +at });
+      c.entries.push({ id, qty: +qty, by, u: uid, at: +at, kind: kind || "count" });
       c.entries.sort((a, b) => a.at - b.at);
       normCount(c); touched.add(key);
     }
-    for (const [branch, n, loc, note, at] of ch.meta) {
-      const key = `${branch}|${n}`;
+    for (const [branch, n, loc, note, at, round, vname, vat, vby] of ch.meta) {
+      if (!round) continue;
+      const key = `${round}|${n}`;
       const c = state.counts[key];
       if (!c || (c.metaAt && c.metaAt > at)) continue;
-      if (c.loc !== (loc ?? undefined) || (c.note || "") !== (note || "")) touched.add(key);
-      c.loc = loc ?? undefined; c.note = note || ""; c.metaAt = at;
+      const ver = vat ? { by: vname, u: vby, at: +vat } : undefined;
+      if (c.loc !== (loc ?? undefined) || (c.note || "") !== (note || "") || !!c.ver !== !!ver) touched.add(key);
+      c.loc = loc ?? undefined; c.note = note || ""; c.metaAt = at; c.ver = ver;
     }
     if (ch.extras.length) {
       const exs = store.get(LS_EXTRAS, {});
-      for (const [branch, n, name, loc, by, uid, at, deleted] of ch.extras) {
-        const key = `${branch}|${n}`;
+      for (const [branch, n, name, loc, by, uid, at, deleted, round] of ch.extras) {
+        if (!round) continue;
+        const key = `${round}|${n}`;
         if (deleted) {
           if (!exs[key]) continue;
           delete exs[key]; extrasChanged = true;
           const bi = state.data?.branches.indexOf(branch);
-          const it = bi >= 0 ? state.data.items.find((x) => x.x && x.b === bi && x.n === n) : null;
+          const it = bi >= 0 ? state.data.items.find((x) => x.x && x.xr === round && x.b === bi && x.n === n) : null;
           if (it && !state.counts[key]) it.gone = true;
         } else {
           if (exs[key]?.synced && exs[key].name === name && exs[key].loc === loc) continue;
-          const rec = { b: branch, n, name, loc, by, u: uid, at: +at, synced: true };
+          const rec = { r: round, b: branch, n, name, loc, by, u: uid, at: +at, synced: true };
           exs[key] = rec; extrasChanged = true;
           if (state.data) {
             if (!state.data.branches.includes(branch)) { state.needReload = true; continue; }
@@ -970,11 +1123,22 @@
       if (state.editing) state.needReload = true;
       else { state.needReload = false; reloadItems().then(() => toast("✓ تم تحديث المخزون من الإدارة")).catch(() => {}); return; }
     }
-    if (!state.data || (!touched.size && !extrasChanged)) return;
+    if (!state.data || (!touched.size && !extrasChanged && !roundsChanged)) return;
     // تحديث الشاشة الحالية بدون ما نرجّع المستخدم لفوق
-    if (state.screen === "inventory") {
-      if (extrasChanged && !state.editing) {
-        state.branchItems = scopedItems(state.branch);
+    if (state.screen === "inventory" && state.round) {
+      const r = state.rounds[state.round.id];
+      if (roundsChanged && (!r || !myRounds().includes(r))) {
+        // الجولة انقفلت أو انحذفت أو ما عادت له
+        if (!state.editing) { toast(r?.status === "closed" ? "تم إغلاق هذا الجرد من الإدارة" : "هذا الجرد ما عاد متاح لك", 3500); go("branches"); }
+        return;
+      }
+      if (roundsChanged && r.status !== state.round.status && !state.editing) {
+        toast(r.status === "review" ? "بدأت مراجعة الفروقات — أعد عد الأصناف اللي فيها فرق" : "رجع الجرد مفتوح", 3500);
+        openRound(r); return;
+      }
+      state.round = r;
+      if ((extrasChanged || roundsChanged) && !state.editing) {
+        setRoundItems();
         const top = $("#table-wrap").scrollTop;
         applyFilter();
         $("#table-wrap").scrollTop = top;
@@ -983,8 +1147,8 @@
         updateProgress();
       }
       if (state.editing && touched.has(keyOf(state.editing))) { renderEntries(); updateDiff(); }
-    } else if (state.screen === "branches") renderBranches();
-    else if (state.screen === "admin" && adminTab === "stats") renderStats();
+    } else if (state.screen === "branches") renderRounds();
+    else if (state.screen === "admin" && !state.adminBusy) renderAdmin(true);
   }
 
   let syncT, syncTick = 0;
@@ -1036,25 +1200,29 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 3000);
   }
   const today = () => new Date().toISOString().slice(0, 10);
-  function countRows(items, blind) {
-    const head = ["الفرع", "رقم الصنف", "اسم الصنف", "النوع", "الموقع بالنظام", "الموقع بعد الجرد",
+  // صفوف جولة: [{r, it, c}] — withTodo = حتى اللي ما انجرد
+  const roundRows = (r, withTodo = true) => roundItemsOf(r).map((it) => ({ r, it, c: countIn(r, it) })).filter((x) => withTodo || x.c);
+  const dt = (t) => (t ? new Date(t).toLocaleString("en-GB") : "");
+  function countRows(rows, blind) {
+    const head = ["الجرد", "الفرع", "رقم الصنف", "اسم الصنف", "النوع", "الموقع بالنظام", "الموقع بعد الجرد",
       ...(blind ? [] : ["المتوفر", "المحجوز"]), "الجرد (بالرف)", ...(blind ? [] : ["الجرد النهائي (+المحجوز)", "الفرق"]),
-      "تفصيل الإدخالات", "ملاحظات", "آخر جرد بواسطة", "التاريخ"];
-    const rows = items.filter((it) => !it.gone).map((it) => {
-      const c = countOf(it);
-      return [branchLabel(state.data.branches[it.b]), it.n, it.name, it.x ? "زائد (غير موجود بالنظام)" : "", it.loc, c?.loc ?? "",
+      "تفصيل الإدخالات", "التأكيد", "ملاحظات", "آخر جرد بواسطة", "التاريخ"];
+    const out = rows.filter(({ it }) => !it.gone).map(({ r, it, c }) => {
+      const type = it.x ? "زائد (غير موجود بالنظام)" : !inRange(r, it) ? "من موقع ثاني" : !c ? "ما انجرد" : "";
+      return [roundTitle(r), branchLabel(state.data.branches[it.b]), it.n, it.name, type, it.loc, c?.loc ?? "",
         ...(blind ? [] : [it.q, it.r]), c?.qty ?? "", ...(blind ? [] : [c ? finalOf(it, c) : "", c ? diffOf(it, c) : ""]),
-        c ? c.entries.map((e) => `${e.qty} (${e.by || ""})`).join(" + ") : "",
-        c?.note ?? "", c?.by ?? "", c ? new Date(c.at).toLocaleString("en-GB") : ""];
+        c ? c.entries.map((e) => `${e.kind === "fix" && e.qty > 0 ? "+" : ""}${e.qty} (${e.kind === "fix" ? "تصحيح " : ""}${e.by || ""})`).join(" ، ") : "",
+        c?.ver ? `${c.ver.by || ""} ${dt(c.ver.at)}` : "", c?.note ?? "", c?.by ?? "", c ? dt(c.at) : ""];
     });
-    return [head, ...rows];
+    return [head, ...out];
   }
-  function exportCSV(items, name, blind) {
-    const csv = countRows(items, blind).map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  function exportCSV(rows, name, blind) {
+    const csv = countRows(rows, blind).map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
     download(name, "﻿" + csv, "text/csv;charset=utf-8");
   }
   $("#export-btn").addEventListener("click", () => {
-    exportCSV(state.branchItems, `جرد-${branchLabel(state.data.branches[state.branch])}-${today()}.csv`, isBlind());
+    if (!state.round) return;
+    exportCSV(roundRows(state.round, true), `جرد-${roundTitle(state.round)}-${today()}.csv`.replace(/[\\/:*?"<>|]/g, "-"), isBlind());
   });
 
   // ملف جرد (JSON) يرسله الموظف للمدير ليدمجه في جهازه
@@ -1067,14 +1235,18 @@
   $("#backup-card").addEventListener("click", () => exportBackup(false));
 
   /* ---------- لوحة التحكم (للمدير) ---------- */
-  let adminTab = "stats";
+  let adminTab = "rounds";
   $$("#admin-tabs button").forEach((b) => b.addEventListener("click", () => { adminTab = b.dataset.tab; renderAdmin(); }));
 
-  function renderAdmin() {
+  // soft = تحديث من المزامنة: ما نرسم وفيه نافذة مفتوحة أو المستخدم يتعامل مع الصفحة
+  function renderAdmin(soft) {
+    if (soft && $$(".sheet-backdrop:not([hidden])").length) return;
+    if (soft && adminTab !== "rounds" && adminTab !== "locs") return;
     $$("#admin-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === adminTab));
-    ["stats", "users", "data"].forEach((t) => ($("#tab-" + t).hidden = t !== adminTab));
-    if (adminTab === "stats") renderStats();
-    if (adminTab === "users") { renderUsers(); if (CLOUD) loadProfiles(); }
+    ["rounds", "locs", "users", "data"].forEach((t) => ($("#tab-" + t).hidden = t !== adminTab));
+    if (adminTab === "rounds") renderRoundsAdmin();
+    if (adminTab === "locs") renderLocs();
+    if (adminTab === "users") { renderUsers(); if (CLOUD && !soft) loadProfiles(); }
     if (adminTab === "data") renderDataTab();
   }
   async function loadProfiles() {
@@ -1083,55 +1255,368 @@
     if (adminTab === "users") renderUsers();
   }
 
-  function renderStats() {
-    const { branches, items } = state.data;
-    const per = branches.map(() => ({ total: 0, done: 0, diff: 0, plus: 0, minus: 0, extra: 0 }));
+  /* ===== لوحة التحكم ← الجرد (الجولات) ===== */
+  // أسماء اللي جردوا في الجولة: name → عدد الإدخالات
+  function roundCounters(r) {
+    const m = new Map();
+    const pre = r.id + "|";
+    for (const [k, c] of Object.entries(state.counts)) {
+      if (!k.startsWith(pre)) continue;
+      for (const e of c.entries) m.set(e.by || "—", (m.get(e.by || "—") || 0) + 1);
+    }
+    return m;
+  }
+  const fmtDate = (t) => (t ? new Date(t).toLocaleDateString("ar-SA-u-nu-latn", { day: "numeric", month: "short" }) : "");
+  function renderRoundsAdmin() {
+    const all = Object.values(state.rounds).filter((r) => !r.deleted);
+    const active = all.filter((r) => r.status !== "closed").sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    const closed = all.filter((r) => r.status === "closed").sort((a, b) => (a.closed_at < b.closed_at ? 1 : -1)).slice(0, 30);
+    const card = (r) => {
+      const p = roundProgress(r);
+      const who = [...roundCounters(r).keys()];
+      const st = r.status;
+      const acts = st === "open"
+        ? `<button data-act="review" class="btn primary sm-btn">إنهاء الجرد ← مراجعة الفروقات</button><button data-act="report" class="btn ghost sm-btn">التقرير</button><button data-act="edit" class="btn ghost sm-btn">تعديل</button><button data-act="del" class="btn ghost danger sm-btn">حذف</button>`
+        : st === "review"
+        ? `<button data-act="close" class="btn primary sm-btn">إغلاق واعتماد</button><button data-act="reopen" class="btn ghost sm-btn">رجوع للجرد</button><button data-act="report" class="btn ghost sm-btn">التقرير</button>`
+        : `<button data-act="erp" class="btn primary sm-btn">ملف النظام (Excel)</button><button data-act="excel" class="btn ghost sm-btn">التفاصيل</button><button data-act="report" class="btn ghost sm-btn">التقرير</button>`;
+      return `<div class="stat-card round-admin st-${st}" data-id="${esc(r.id)}">
+        <div class="sc-top"><strong>${esc(r.name || branchLabel(r.branch))}</strong><i class="badge ${st === "review" ? "b2" : st === "closed" ? "b3" : ""}">${STATUS_AR[st]}</i></div>
+        <small class="muted">${esc(branchLabel(r.branch))} · <b dir="ltr">${esc(rangeText(r))}</b> · فُتح ${fmtDate(r.created_at)}${r.closed_at ? " · أُغلق " + fmtDate(r.closed_at) : ""}</small>
+        <span class="bc-bar"><span style="width:${p.pct}%"></span></span>
+        <div class="sc-nums">
+          <div><b>${fmt(p.done)}/${fmt(p.total)}</b><small>تم جرده</small></div>
+          <div class="w"><b>${fmt(p.diff)}</b><small>فيه فرق</small></div>
+          ${st === "open" ? `<div><b>${fmt(p.total - p.done)}</b><small>باقي</small></div><div><b>${fmt(p.extra)}</b><small>زائد</small></div>`
+            : st === "review" ? `<div><b>${fmt(p.review)}</b><small>للمراجعة</small></div><div><b>${fmt(p.verified)}</b><small>مؤكد</small></div>`
+            : `<div><b>${fmt(p.total - p.done)}</b><small>ما انجرد</small></div><div><b>${fmt(p.verified)}</b><small>مؤكد</small></div>`}
+        </div>
+        <small class="muted">${who.length ? "جرد: " + who.map(esc).join("، ") : "ما أحد بدأ"}${r.users?.length ? ` · مخصص لـ ${r.users.length} موظف` : ""}</small>
+        <div class="ra-acts">${acts}</div>
+      </div>`;
+    };
+    $("#tab-rounds").innerHTML =
+      `<button class="btn primary block" id="new-round"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> فتح جرد جديد (موقع / نطاق مواقع)</button>` +
+      `<h4 class="sec">الجاري</h4>` + (active.map(card).join("") || `<p class="muted pad">ما فيه جرد مفتوح</p>`) +
+      (closed.length ? `<h4 class="sec">المغلق</h4>` + closed.map(card).join("") : "");
+  }
+  $("#tab-rounds").addEventListener("click", (e) => {
+    if (e.target.closest("#new-round")) return openRoundForm(null);
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    const r = state.rounds[b.closest("[data-id]").dataset.id]; if (!r) return;
+    roundAction(r, b.dataset.act);
+  });
+  function updateRound(r, fields) {
+    Object.assign(r, fields);
+    saveRounds();
+    pushRound(r);
+    renderAdmin();
+  }
+  async function roundAction(r, act) {
+    if (act === "report") return openReport(r);
+    if (act === "edit") return openRoundForm(r);
+    if (act === "erp") return exportERP(r);
+    if (act === "excel") return exportRoundsExcel([r], `جرد-${roundTitle(r)}-${today()}.xlsx`);
+    if (act === "del") {
+      if (!confirm(`حذف الجرد "${roundTitle(r)}"؟ ${roundProgress(r).done ? "فيه أصناف مجرودة — بتختفي من التطبيق." : ""}`)) return;
+      return updateRound(r, { deleted: true });
+    }
+    if (act === "review") {
+      const p = roundProgress(r);
+      if (!confirm(`إنهاء الجرد والبدء بمراجعة الفروقات؟\n\nتم جرد ${p.done} من ${p.total}\nللمراجعة: ${p.review} صنف (فيه فرق أو ما انجرد)\n\nالموظفين يشوفون بس الأصناف اللي تحتاج إعادة عد.`)) return;
+      return updateRound(r, { status: "review", review_at: new Date().toISOString() });
+    }
+    if (act === "reopen") return updateRound(r, { status: "open" });
+    if (act === "close") {
+      const p = roundProgress(r);
+      if (!confirm(`إغلاق واعتماد الجرد؟\n${p.review ? `⚠️ باقي ${p.review} صنف ما تأكد — بيتسجل بآخر عد (اللي ما انجرد = 0 بالرف).\n` : ""}\nبعد الإغلاق ينزل لك ملف النظام (رقم الصنف + الكمية + الموقع).`)) return;
+      const who = Object.fromEntries(roundCounters(r));
+      updateRound(r, { status: "closed", closed_at: new Date().toISOString(),
+        summary: { total: p.total, done: p.done, diff: p.diff, verified: p.verified, counters: Object.keys(who) } });
+      exportERP(r);
+    }
+  }
+
+  // ---- فتح / تعديل جرد ----
+  let editingRound = null;
+  function locGroups(items) {
+    const g = new Map();
     for (const it of items) {
-      if (it.gone) continue;
-      const s = per[it.b]; s.total++;
+      const raw = cleanLoc(it.loc).match(/^[A-Z]+-?\d+/)?.[0];
+      const p = parseLoc(raw); if (!p) continue;
+      const cur = g.get(p.p);
+      if (!cur) g.set(p.p, { p: p.p, min: p.n, minS: raw, max: p.n, maxS: raw, cnt: 1 });
+      else { cur.cnt++; if (p.n < cur.min) { cur.min = p.n; cur.minS = raw; } if (p.n > cur.max) { cur.max = p.n; cur.maxS = raw; } }
+    }
+    return [...g.values()].sort((a, b) => (a.p < b.p ? -1 : 1));
+  }
+  const branchItemsOf = (bname) => { const bi = state.data.branches.indexOf(bname); return state.data.items.filter((it) => it.b === bi && !it.x && !it.gone); };
+  function openRoundForm(r) {
+    editingRound = r;
+    const bs = state.data.branches;
+    if (!bs.length) { toast("ارفع المخزون أول من تبويب البيانات"); return; }
+    $("#rd-title").textContent = r ? "تعديل الجرد" : "فتح جرد جديد";
+    $("#rd-branch").innerHTML = bs.map((b) => `<option value="${esc(b)}"${(r ? r.branch : state.lastRoundBranch || bs[0]) === b ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("");
+    $("#rd-branch").disabled = !!r;
+    $("#rd-from").value = r?.loc_from || ""; $("#rd-to").value = r?.loc_to || "";
+    $("#rd-name").value = r?.name || "";
+    const users = allUsers().filter((u) => u.role !== "admin" && u.active !== false);
+    const sel = new Set(r?.users || []);
+    $("#rd-users").innerHTML = users.length ? users.map((u) => {
+      const id = CLOUD ? u.id : u.username;
+      return `<label class="uchk"><input type="checkbox" value="${esc(id)}"${sel.has(id) ? " checked" : ""}><span>${esc(u.name)}</span></label>`;
+    }).join("") : `<p class="muted">ما فيه موظفين — أضفهم من تبويب المستخدمون</p>`;
+    $("#rd-error").hidden = true;
+    renderRoundPrefixes();
+    openOverlay("round-backdrop");
+    if (CLOUD && !state.profiles) loadProfiles().then(() => { if (!$("#round-backdrop").hidden && editingRound === r) openRoundForm(r); });
+  }
+  function renderRoundPrefixes() {
+    $("#rd-prefixes").innerHTML = locGroups(branchItemsOf($("#rd-branch").value)).map((g) =>
+      `<button type="button" class="lp" data-from="${esc(g.minS)}" data-to="${esc(g.maxS)}"><b>${esc(g.p)}</b><small dir="ltr">${esc(g.minS)} → ${esc(g.maxS)}</small><small>${fmt(g.cnt)} صنف</small></button>`).join("")
+      || `<p class="muted">لا توجد مواقع</p>`;
+    updateRoundPreview();
+  }
+  function updateRoundPreview() {
+    const bname = $("#rd-branch").value;
+    const r = { id: editingRound?.id || "_", branch: bname, loc_from: cleanLoc($("#rd-from").value), loc_to: cleanLoc($("#rd-to").value) };
+    const t = roundTest(r);
+    const its = branchItemsOf(bname).filter((it) => !t || t(it.loc || ""));
+    const overlap = Object.values(state.rounds).filter((o) => !o.deleted && o.status !== "closed" && o.branch === bname && o.id !== r.id)
+      .filter((o) => its.some((it) => inRange(o, it))).map(roundTitle);
+    $("#rd-preview").innerHTML = `<b>${fmt(its.length)}</b> صنف ${t ? `في النطاق <b dir="ltr">${esc(rangeText(r))}</b>` : "(الفرع كامل)"}` +
+      (overlap.length ? `<br><span class="w">⚠️ يتداخل مع جرد مفتوح: ${overlap.map(esc).join("، ")}</span>` : "");
+  }
+  $("#rd-branch").addEventListener("change", () => { state.lastRoundBranch = $("#rd-branch").value; renderRoundPrefixes(); });
+  ["#rd-from", "#rd-to"].forEach((s) => $(s).addEventListener("input", updateRoundPreview));
+  $("#rd-prefixes").addEventListener("click", (e) => {
+    const b = e.target.closest(".lp"); if (!b) return;
+    $("#rd-from").value = b.dataset.from; $("#rd-to").value = b.dataset.to;
+    updateRoundPreview();
+  });
+  $("#rd-save").addEventListener("click", () => {
+    const from = cleanLoc($("#rd-from").value), to = cleanLoc($("#rd-to").value);
+    const users = $$("#rd-users input:checked").map((i) => i.value);
+    const fields = { loc_from: from, loc_to: to, name: $("#rd-name").value.trim(), users };
+    if (!from && !to && !confirm("ما حددت مواقع — يعني جرد الفرع كامل. متأكد؟")) return;
+    closeOverlay("round-backdrop");
+    if (editingRound) { updateRound(editingRound, fields); toast("✓ تم تعديل الجرد"); return; }
+    const r = { id: window.DB.uuid(), branch: $("#rd-branch").value, status: "open", created_at: new Date().toISOString(), deleted: false, ...fields };
+    state.rounds[r.id] = r;
+    updateRound(r, {});
+    toast("✓ تم فتح الجرد — يطلع للموظفين الحين", 3000);
+  });
+
+  // ---- تقرير نهاية الجرد ----
+  async function openReport(r) {
+    $("#rp-title").textContent = "تقرير: " + roundTitle(r);
+    $("#rp-body").innerHTML = `<p class="muted pad">جاري تجهيز التقرير…</p>`;
+    openOverlay("report-backdrop");
+    let entries = null;
+    if (CLOUD) {
+      await window.DB.flush().catch(() => {});
+      try {
+        entries = (await window.DB.roundEntries(r.id)).map(([id, n, qty, u, by, at, deleted, delBy, kind]) =>
+          ({ id, n, qty: +qty, u, by, at: +at, deleted, delBy, kind: kind || "count" }));
+      } catch (e) { toast("تعذّر جلب كل الإدخالات — التقرير من البيانات المحفوظة", 3000); }
+    }
+    if (!entries) {
+      entries = [];
+      const pre = r.id + "|";
+      for (const [k, c] of Object.entries(state.counts)) if (k.startsWith(pre)) for (const e of c.entries) entries.push({ ...e, n: k.slice(pre.length), deleted: false, kind: e.kind || "count" });
+    }
+    state.report = buildReport(r, entries);
+    $("#rp-body").innerHTML = reportHTML(state.report);
+  }
+  function buildReport(r, entries) {
+    const rows = roundRows(r, true);
+    const s = { total: 0, done: 0, todo: 0, plus: 0, minus: 0, plusQ: 0, minusQ: 0, extra: 0, moved: 0, verified: 0, fixes: 0 };
+    const byItem = new Map(rows.map((x) => [x.it.n, x]));
+    for (const { it, c } of rows) {
       if (it.x) s.extra++;
-      const c = countOf(it);
+      else if (inRange(r, it)) s.total++;
       if (c) {
         s.done++;
         const d = diffOf(it, c);
-        if (d !== 0) { s.diff++; if (d > 0) s.plus++; else s.minus++; }
-      }
+        if (d > 0) { s.plus++; s.plusQ += d; } else if (d < 0) { s.minus++; s.minusQ -= d; }
+        if (!it.x && c.loc != null && c.loc !== (it.loc || "")) s.moved++;
+        if (c.ver) s.verified++;
+      } else if (!it.x && inRange(r, it)) s.todo++;
     }
-    const users = new Map();
-    for (const c of Object.values(state.counts)) {
-      for (const e of c.entries) {
-        const k = e.u || e.by || "—";
-        const x = users.get(k) || { name: e.by || k, entries: 0, qty: 0, last: 0, today: 0 };
-        x.entries++; x.qty += +e.qty || 0; x.last = Math.max(x.last, e.at || 0);
-        if (new Date(e.at).toDateString() === new Date().toDateString()) x.today++;
-        users.set(k, x);
+    // الموظفين
+    const U = new Map();
+    const get = (u, by) => {
+      const k = u || by || "—";
+      if (!U.has(k)) U.set(k, { name: by || k, items: new Set(), entries: 0, fixes: 0, dels: 0, times: [], verified: 0 });
+      const x = U.get(k); if (by) x.name = by; return x;
+    };
+    for (const e of entries) {
+      const x = get(e.u, e.by);
+      if (e.deleted) {
+        // الحذف يُحسب على اللي حذف (أو صاحب الإدخال لو ما ندري)
+        const d = e.delBy ? get(e.delBy, U.get(e.delBy)?.name) : x;
+        d.dels++;
       }
+      if (e.deleted) continue;
+      x.entries++; x.times.push(e.at);
+      if (e.kind === "fix") { x.fixes++; s.fixes++; } else x.items.add(e.n);
     }
-    const order = [...branches.keys()].sort((a, b) => CFG.branchOrder.indexOf(branches[a]) - CFG.branchOrder.indexOf(branches[b]));
-    $("#tab-stats").innerHTML =
-      `<h4 class="sec">الفروع</h4>` +
-      order.map((bi) => {
-        const s = per[bi]; const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
-        return `<div class="stat-card">
-          <div class="sc-top"><strong>${esc(branchLabel(branches[bi]))}</strong><span class="bc-pct">${pct}%</span></div>
-          <span class="bc-bar"><span style="width:${pct}%"></span></span>
-          <div class="sc-nums">
-            <div><b>${fmt(s.done)}</b><small>تم جرده</small></div>
-            <div><b>${fmt(s.total - s.done)}</b><small>متبقي</small></div>
-            <div class="w"><b>${fmt(s.diff)}</b><small>فيه فرق</small></div>
-            <div><b class="ok">+${fmt(s.plus)}</b><small>زيادة</small></div>
-            <div><b class="bad">−${fmt(s.minus)}</b><small>نقص</small></div>
-            <div><b>${fmt(s.extra)}</b><small>صنف زائد</small></div>
-          </div>
-        </div>`;
-      }).join("") +
-      `<h4 class="sec">نشاط الموظفين <small class="muted">(على هذا الجهاز)</small></h4>` +
-      ([...users.values()].sort((a, b) => b.last - a.last).map((x) => `<div class="urow">
-          <span class="avatar">${esc((x.name || "?").trim()[0] || "?")}</span>
-          <span class="u-main"><strong>${esc(x.name)}</strong><small>آخر جرد ${x.last ? fmtTime(x.last) : "—"}</small></span>
-          <span class="u-num"><b>${fmt(x.entries)}</b><small>إدخال · اليوم ${fmt(x.today)}</small></span>
-        </div>`).join("") || `<p class="muted pad">لا يوجد جرد بعد</p>`);
+    for (const { c } of rows) if (c?.ver) { const x = get(c.ver.u, c.ver.by); x.verified++; }
+    const opened = Date.parse(r.created_at) || 0;
+    const people = [...U.values()].filter((x) => x.entries || x.dels || x.verified).map((x) => {
+      const t = x.times.sort((a, b) => a - b);
+      let active = 0;
+      for (let i = 1; i < t.length; i++) active += Math.min(t[i] - t[i - 1], 10 * 60000);   // فترات التوقف فوق 10 دقايق ما تنحسب
+      active += t.length ? 60000 : 0;
+      const rate = active ? x.items.size / (active / 3600000) : 0;
+      return { ...x, items: x.items.size, first: t[0], last: t.at(-1), active, rate, late: t[0] && opened ? t[0] - opened : 0 };
+    }).sort((a, b) => b.items - a.items);
+    const ranked = people.filter((p) => p.items >= 5).sort((a, b) => b.rate - a.rate);
+    const end = Date.parse(r.closed_at || "") || Date.now();
+    return { r, s, people, fastest: ranked[0], slowest: ranked.length > 1 ? ranked.at(-1) : null, duration: end - opened, byItem };
   }
+  const dur = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m} د` : `${Math.floor(m / 60)} س ${m % 60} د`; };
+  const hm = (t) => (t ? new Date(t).toLocaleString("ar-SA-u-nu-latn", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "—");
+  function reportHTML(R) {
+    const { r, s, people } = R;
+    const box = (v, t, cls = "") => `<div class="${cls}"><b>${v}</b><small>${t}</small></div>`;
+    return `<div class="rp-meta">${esc(branchLabel(r.branch))} · <b dir="ltr">${esc(rangeText(r))}</b> · ${STATUS_AR[r.status]}<br>
+        فُتح ${hm(Date.parse(r.created_at))}${r.review_at ? ` · المراجعة ${hm(Date.parse(r.review_at))}` : ""}${r.closed_at ? ` · أُغلق ${hm(Date.parse(r.closed_at))}` : ""} · المدة ${dur(R.duration)}</div>
+      <div class="sc-nums rp-nums">
+        ${box(`${fmt(s.done)}/${fmt(s.total)}`, "تم جرده")}${box(fmt(s.todo), "ما انجرد", s.todo ? "w" : "")}
+        ${box(`+${fmt(s.plus)}`, `زيادة (${fmt(s.plusQ)} حبة)`, "okc")}${box(`−${fmt(s.minus)}`, `نقص (${fmt(s.minusQ)} حبة)`, "badc")}
+        ${box(fmt(s.extra), "صنف زائد")}${box(fmt(s.moved), "تغيّر موقعه")}${box(fmt(s.verified), "مؤكد بالمراجعة")}${box(fmt(s.fixes), "تصحيح بالمراجعة")}
+      </div>
+      ${R.fastest ? `<p class="rp-badges">⚡ الأسرع: <b>${esc(R.fastest.name)}</b> (${Math.round(R.fastest.rate)} صنف/ساعة)${R.slowest && R.slowest !== R.fastest ? ` · 🐢 الأبطأ: <b>${esc(R.slowest.name)}</b> (${Math.round(R.slowest.rate)} صنف/ساعة)` : ""}</p>` : ""}
+      <div class="rp-table-wrap"><table class="rp-table">
+        <thead><tr><th>الموظف</th><th>أصناف</th><th>إدخالات</th><th>صنف/ساعة</th><th>بدأ</th><th>آخر عد</th><th>وقت العمل</th><th>تأخر عن الفتح</th><th>تصحيح</th><th>حذف</th><th>تأكيد</th></tr></thead>
+        <tbody>${people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${fmt(p.items)}</td><td>${fmt(p.entries)}</td><td>${p.items ? Math.round(p.rate) : "—"}</td>
+          <td>${hm(p.first)}</td><td>${hm(p.last)}</td><td>${p.active ? dur(p.active) : "—"}</td><td>${p.first ? dur(p.late) : "—"}</td>
+          <td class="${p.fixes ? "w" : ""}">${fmt(p.fixes)}</td><td class="${p.dels ? "w" : ""}">${fmt(p.dels)}</td><td>${fmt(p.verified)}</td></tr>`).join("")
+          || `<tr><td colspan="11" class="muted">ما فيه جرد بعد</td></tr>`}</tbody>
+      </table></div>
+      <p class="hint">صنف/ساعة = عدد الأصناف ÷ وقت العمل الفعلي (التوقف أكثر من 10 دقايق ما ينحسب). التصحيح = تعديل بالمراجعة، والحذف = إدخالات انحذفت.</p>`;
+  }
+  $("#rp-export").addEventListener("click", async () => {
+    const R = state.report; if (!R) return;
+    const X = await loadXLSX();
+    const wb = X.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+    const s = R.s;
+    const sum = X.utils.aoa_to_sheet([
+      ["الجرد", roundTitle(R.r)], ["الفرع", branchLabel(R.r.branch)], ["النطاق", rangeText(R.r)], ["الحالة", STATUS_AR[R.r.status]],
+      ["فُتح", dt(R.r.created_at)], ["المراجعة", dt(R.r.review_at)], ["أُغلق", dt(R.r.closed_at)], ["المدة", dur(R.duration)], [],
+      ["أصناف النطاق", s.total], ["تم جرده", s.done], ["ما انجرد", s.todo], ["زيادة (أصناف)", s.plus], ["زيادة (حبات)", s.plusQ],
+      ["نقص (أصناف)", s.minus], ["نقص (حبات)", s.minusQ], ["أصناف زائدة", s.extra], ["تغيّر موقعه", s.moved], ["مؤكد بالمراجعة", s.verified], ["تصحيحات", s.fixes],
+    ]);
+    sum["!cols"] = [{ wch: 18 }, { wch: 30 }];
+    X.utils.book_append_sheet(wb, sum, "الملخص");
+    const ppl = X.utils.aoa_to_sheet([["الموظف", "أصناف", "إدخالات", "صنف/ساعة", "بدأ", "آخر عد", "وقت العمل (دقيقة)", "تأخر عن الفتح (دقيقة)", "تصحيح", "حذف", "تأكيد"],
+      ...R.people.map((p) => [p.name, p.items, p.entries, Math.round(p.rate), dt(p.first), dt(p.last), Math.round(p.active / 60000), Math.round(p.late / 60000), p.fixes, p.dels, p.verified])]);
+    ppl["!cols"] = [18, 8, 8, 10, 18, 18, 12, 14, 8, 8, 8].map((w) => ({ wch: w }));
+    X.utils.book_append_sheet(wb, ppl, "الموظفين");
+    const det = X.utils.aoa_to_sheet(countRows(roundRows(R.r, true), false));
+    X.utils.book_append_sheet(wb, det, "الأصناف");
+    X.writeFile(wb, `تقرير-${roundTitle(R.r)}-${today()}.xlsx`.replace(/[\\/:*?"<>|]/g, "-"));
+  });
+
+  // ---- ملف النظام: رقم الصنف + الكمية (جرد + محجوز) + الموقع المحدث ----
+  async function exportERP(r) {
+    if (CLOUD) await window.DB.sync(applyChanges);
+    const rows = roundRows(r, true).filter(({ it }) => !it.gone);
+    const erp = rows.map(({ it, c }) => [it.n, (c?.qty || 0) + resv(it), (c?.loc ?? it.loc) || ""]);
+    try {
+      const X = await loadXLSX();
+      const wb = X.utils.book_new();
+      const sh = X.utils.aoa_to_sheet([["رقم الصنف", "الكمية", "الموقع"], ...erp]);
+      sh["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 14 }];
+      X.utils.book_append_sheet(wb, sh, "للنظام");
+      const det = X.utils.aoa_to_sheet(countRows(rows, false));
+      X.utils.book_append_sheet(wb, det, "التفاصيل");
+      X.writeFile(wb, `للنظام-${roundTitle(r)}-${today()}.xlsx`.replace(/[\\/:*?"<>|]/g, "-"));
+      toast(`✓ ملف النظام: ${fmt(erp.length)} صنف`, 3000);
+    } catch { toast("تعذّر إنشاء ملف Excel"); }
+  }
+  async function exportRoundsExcel(rounds, name) {
+    const done = [], todo = [];
+    for (const r of rounds) for (const x of roundRows(r, true)) (x.c ? done : todo).push(x);
+    const X = await loadXLSX();
+    const wb = X.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+    const sh1 = X.utils.aoa_to_sheet(countRows(done, false));
+    sh1["!cols"] = [20, 14, 18, 34, 14, 12, 12, 9, 9, 10, 12, 9, 30, 20, 20, 14, 18].map((w) => ({ wch: w }));
+    X.utils.book_append_sheet(wb, sh1, "الجرد");
+    const sh2 = X.utils.aoa_to_sheet([["الجرد", "الفرع", "رقم الصنف", "اسم الصنف", "الموقع", "المتوفر", "المحجوز"],
+      ...todo.filter(({ it }) => !it.x).map(({ r, it }) => [roundTitle(r), branchLabel(r.branch), it.n, it.name, it.loc, it.q, it.r])]);
+    sh2["!cols"] = [20, 14, 18, 34, 12, 9, 9].map((w) => ({ wch: w }));
+    X.utils.book_append_sheet(wb, sh2, "لم يُجرد");
+    X.writeFile(wb, name.replace(/[\\/:*?"<>|]/g, "-"));
+    toast(`✓ ${fmt(done.length)} صنف مجرود · ${fmt(todo.length)} ما انجرد`, 3000);
+  }
+
+  // ---- خريطة المواقع: وش انجرد ومتى ومين، ووش باقي ----
+  let locsBranch = null, locsSel = null;
+  function renderLocs() {
+    const bs = state.data.branches;
+    if (!bs.length) { $("#tab-locs").innerHTML = `<p class="muted pad">ارفع المخزون أول</p>`; return; }
+    if (!bs.includes(locsBranch)) {
+      // نبدأ بفرع آخر جرد
+      const last = Object.values(state.rounds).filter((r) => !r.deleted).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+      locsBranch = last && bs.includes(last.branch) ? last.branch : bs[0];
+    }
+    const rounds = Object.values(state.rounds).filter((r) => !r.deleted && r.branch === locsBranch);
+    const tests = rounds.map((r) => ({ r, t: roundTest(r) }));
+    const bins = new Map();
+    let noLoc = 0;
+    for (const it of branchItemsOf(locsBranch)) {
+      const bin = cleanLoc(it.loc).match(/^[A-Z]+-?\d+/)?.[0];
+      if (!bin) { noLoc++; continue; }
+      bins.set(bin, (bins.get(bin) || 0) + 1);
+    }
+    const info = (bin) => {
+      const cov = tests.filter(({ t }) => !t || t(bin)).map(({ r }) => r);
+      const open = cov.find((r) => r.status !== "closed");
+      const closed = cov.filter((r) => r.status === "closed").sort((a, b) => (a.closed_at < b.closed_at ? 1 : -1))[0];
+      return { open, closed, st: open ? "prog" : closed ? "done" : "left" };
+    };
+    const groups = new Map();
+    for (const [bin, n] of bins) {
+      const p = parseLoc(bin);
+      if (!groups.has(p.p)) groups.set(p.p, []);
+      groups.get(p.p).push({ bin, n, num: p.n, ...info(bin) });
+    }
+    let tot = { done: 0, prog: 0, left: 0 };
+    const html = [...groups.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([p, list]) => {
+      list.sort((a, b) => a.num - b.num);
+      const c = { done: 0, prog: 0, left: 0 };
+      list.forEach((x) => { c[x.st]++; tot[x.st]++; });
+      return `<div class="loc-group"><div class="lg-head"><b>${esc(p)}</b><small>${fmt(list.length)} موقع · <span class="okc">تم ${fmt(c.done)}</span> · <span class="w">جاري ${fmt(c.prog)}</span> · باقي ${fmt(c.left)}</small></div>
+        <div class="lg-bins">${list.map((x) => `<button class="bin ${x.st}${locsSel === x.bin ? " sel" : ""}" data-bin="${esc(x.bin)}" title="${esc(x.bin)} · ${x.n} صنف">${esc(x.bin.replace(/^[A-Z]+-?/, ""))}</button>`).join("")}</div>
+        ${list.some((x) => x.bin === locsSel) ? binDetail(list.find((x) => x.bin === locsSel)) : ""}</div>`;
+    }).join("");
+    const all = tot.done + tot.prog + tot.left;
+    $("#tab-locs").innerHTML =
+      `<div class="locs-top"><select id="locs-branch">${bs.map((b) => `<option value="${esc(b)}"${b === locsBranch ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("")}</select>
+        <div class="legend"><span class="bin done"></span>تم <span class="bin prog"></span>جاري <span class="bin left"></span>باقي</div></div>
+      <div class="sc-nums rp-nums">
+        <div><b>${all ? Math.round((tot.done / all) * 100) : 0}%</b><small>من مواقع الفرع</small></div>
+        <div class="okc"><b>${fmt(tot.done)}</b><small>موقع انجرد</small></div><div class="w"><b>${fmt(tot.prog)}</b><small>جاري</small></div>
+        <div><b>${fmt(tot.left)}</b><small>باقي</small></div><div><b>${fmt(noLoc)}</b><small>صنف بدون موقع</small></div></div>` +
+      (html || `<p class="muted pad">ما فيه مواقع بهذا الفرع</p>`);
+  }
+  function binDetail(x) {
+    const r = x.open || x.closed;
+    const names = r ? (r.status === "closed" && r.summary?.counters ? r.summary.counters : [...roundCounters(r).keys()]) : [];
+    return `<div class="bin-detail"><b dir="ltr">${esc(x.bin)}</b> · ${fmt(x.n)} صنف<br>${
+      x.open ? `<span class="w">جاري: ${esc(roundTitle(x.open))} (${STATUS_AR[x.open.status]}) · فُتح ${hm(Date.parse(x.open.created_at))}</span>`
+      : x.closed ? `<span class="okc">انجرد: ${esc(roundTitle(x.closed))} · أُغلق ${hm(Date.parse(x.closed.closed_at))}</span>` : "ما انجرد بعد"}${
+      names.length ? `<br>جرده: ${names.map(esc).join("، ")}` : ""}${
+      x.open && x.closed ? `<br><small class="muted">آخر جرد مغلق: ${hm(Date.parse(x.closed.closed_at))}</small>` : ""}</div>`;
+  }
+  $("#tab-locs").addEventListener("change", (e) => { if (e.target.id === "locs-branch") { locsBranch = e.target.value; locsSel = null; renderLocs(); } });
+  $("#tab-locs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-bin]"); if (!b) return;
+    locsSel = locsSel === b.dataset.bin ? null : b.dataset.bin;
+    renderLocs();
+  });
 
   function scopeSummary(u) {
     if (u.role === "admin") return "مدير — كل الصلاحيات";
@@ -1265,7 +1750,7 @@
   function renderDataTab() {
     const { branches, items } = state.data;
     const per = branches.map(() => ({ n: 0, done: 0 }));
-    for (const it of items) if (!it.gone && !it.x) { per[it.b].n++; if (countOf(it)) per[it.b].done++; }
+    for (const it of items) if (!it.gone && !it.x) per[it.b].n++;
     const ver = state.data.version;
     const verTxt = ver && /^\d{14}/.test(ver) ? `${ver.slice(0, 4)}-${ver.slice(4, 6)}-${ver.slice(6, 8)} ${ver.slice(8, 10)}:${ver.slice(10, 12)}` : "";
     $("#ad-info").innerHTML = branches.map((b, i) => `<div><b>${fmt(per[i].n)}</b><small>${esc(branchLabel(b))}</small></div>`).join("") +
@@ -1462,25 +1947,11 @@
   }
   $("#ad-export-all").addEventListener("click", async () => {
     if (CLOUD) { toast("جاري سحب آخر جرد…", 10000); await window.DB.sync(applyChanges); }
-    const live = state.data.items.filter((it) => !it.gone);
-    const done = live.filter((it) => countOf(it));
-    const todo = live.filter((it) => !countOf(it) && !it.x);
-    try {
-      const X = await loadXLSX();
-      const wb = X.utils.book_new();
-      wb.Workbook = { Views: [{ RTL: true }] };
-      const sh1 = X.utils.aoa_to_sheet(countRows(done, false));
-      sh1["!cols"] = [14, 18, 34, 12, 12, 12, 9, 9, 10, 12, 9, 28, 20, 14, 18].map((w) => ({ wch: w }));
-      X.utils.book_append_sheet(wb, sh1, "الجرد");
-      const sh2 = X.utils.aoa_to_sheet([["الفرع", "رقم الصنف", "اسم الصنف", "الموقع", "المتوفر", "المحجوز"],
-        ...todo.map((it) => [branchLabel(state.data.branches[it.b]), it.n, it.name, it.loc, it.q, it.r])]);
-      sh2["!cols"] = [14, 18, 34, 12, 9, 9].map((w) => ({ wch: w }));
-      X.utils.book_append_sheet(wb, sh2, "لم يُجرد");
-      X.writeFile(wb, `جرد-كل-الفروع-${today()}.xlsx`);
-      toast(`✓ ${fmt(done.length)} صنف مجرود · ${fmt(todo.length)} ما انجرد`, 3000);
-    } catch {
-      exportCSV(done, `جرد-كل-الفروع-${today()}.csv`, false);
-    }
+    // كل الجرد المفتوح (جاري + مراجعة). المغلق يطلع من بطاقته في تبويب الجرد
+    const rounds = Object.values(state.rounds).filter((r) => !r.deleted && r.status !== "closed");
+    if (!rounds.length) { toast("ما فيه جرد مفتوح — ملفات الجرد المغلق من تبويب الجرد", 3500); return; }
+    try { await exportRoundsExcel(rounds, `جرد-مفتوح-${today()}.xlsx`); }
+    catch { exportCSV(rounds.flatMap((r) => roundRows(r, false)), `جرد-${today()}.csv`, false); }
   });
   $("#ad-backup").addEventListener("click", () => exportBackup(true));
   $("#ad-import").addEventListener("click", () => $("#ad-file").click());
@@ -1532,6 +2003,7 @@
       catch (e) { toast("تعذّر الحذف: " + e.message, 3500); return; }
     }
     state.counts = {}; saveCounts();
+    Object.values(state.rounds).forEach((r) => { r.deleted = true; }); saveRounds();
     store.del(LS_EXTRAS);
     state.data.items.forEach((it) => { if (it.x) it.gone = true; });
     toast("تم حذف الجرد"); renderAdmin();

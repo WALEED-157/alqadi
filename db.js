@@ -168,11 +168,14 @@ window.DB = (() => {
     if (type === "entry") {
       await q(sb.from("count_entries").upsert(ops.map((o) => o.row), { onConflict: "id", ignoreDuplicates: true }));
     } else if (type === "del") {
-      await q(sb.from("count_entries").update({ deleted: true }).in("id", ops.map((o) => o.id)));
+      await q(sb.from("count_entries").update({ deleted: true, deleted_by: profile?.id }).in("id", ops.map((o) => o.id)));
     } else if (type === "meta" || type === "extra") {
       // نفس الصنف مرتين بنفس الدفعة = نرسل الأخير بس
-      const m = new Map(ops.map((o) => [`${o.row.branch}|${o.row.n}`, o.row]));
-      await q(sb.from(TABLE[type]).upsert([...m.values()], { onConflict: "branch,n" }));
+      const m = new Map(ops.map((o) => [`${o.row.round_id}|${o.row.n}`, o.row]));
+      await q(sb.from(TABLE[type]).upsert([...m.values()], { onConflict: "round_id,n" }));
+    } else if (type === "round") {
+      const m = new Map(ops.map((o) => [o.row.id, o.row]));
+      await q(sb.from("rounds").upsert([...m.values()], { onConflict: "id" }));
     }
   }
   let flushing = null;
@@ -321,6 +324,8 @@ window.DB = (() => {
     return count || 0;
   }
   const resetCounts = () => (on ? q(sb.rpc("admin_clear", { what: "counts" })) : Promise.resolve());
+  // كل إدخالات الجولة حتى المحذوفة (للتقرير): [id, n, qty, user_id, by_name, at, deleted, deleted_by, kind, updated_at]
+  const roundEntries = (rid) => (on ? q(sb.rpc("get_round_entries", { rid }), 40000) : Promise.resolve(null));
 
   return {
     on, uuid, idb,
@@ -330,6 +335,6 @@ window.DB = (() => {
     loadItems, get itemsVersion() { return itemsVersion; },
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync,
     listProfiles, createUser, updateProfile, setPassword, deleteUser,
-    replaceAll, upsertItems, searchCatalog, catalogSize, resetCounts,
+    replaceAll, upsertItems, searchCatalog, catalogSize, resetCounts, roundEntries,
   };
 })();

@@ -1,6 +1,6 @@
 // Service worker: الشبكة أولاً، والكاش عند انقطاع الإنترنت
 // (المخزون نفسه محفوظ في IndexedDB — هنا ملفات التطبيق بس)
-const CACHE = "inv-v8";
+const CACHE = "inv-v9";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "db.js", "config.js", "vendor/supabase.js", "icon.svg", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

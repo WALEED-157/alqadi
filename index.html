@@ -112,12 +112,14 @@
     </button>
   </header>
   <div class="tabs" id="admin-tabs">
-    <button data-tab="stats" class="active">الإحصائيات</button>
+    <button data-tab="rounds" class="active">الجرد</button>
+    <button data-tab="locs">المواقع</button>
     <button data-tab="users">المستخدمون</button>
     <button data-tab="data">البيانات</button>
   </div>
   <main class="admin-body">
-    <div id="tab-stats"></div>
+    <div id="tab-rounds"></div>
+    <div id="tab-locs" hidden></div>
     <div id="tab-users" hidden>
       <button class="btn primary block" id="add-user">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> إضافة مستخدم
@@ -142,7 +144,7 @@
       <div class="data-list">
         <button class="data-btn" id="ad-export-all">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg>
-          <span><strong>سحب الجرد (Excel)</strong><small>جرد كل الموظفين والفروع مع الفروقات + ورقة باللي ما انجرد</small></span>
+          <span><strong>سحب الجرد المفتوح (Excel)</strong><small>كل الجرد الجاري مع الفروقات + ورقة باللي ما انجرد. ملف النظام للجرد المغلق من تبويب الجرد</small></span>
         </button>
         <button class="data-btn" id="ad-import">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
@@ -166,7 +168,7 @@
 <section id="screen-branches" class="screen">
   <header class="topbar">
     <span class="tb-side tb-right">الجرد المخزني</span>
-    <span class="tb-title">اختر الفرع</span>
+    <span class="tb-title">اختر الجرد</span>
     <button class="tb-side tb-left back-btn" data-back="home" aria-label="رجوع">
       رجوع
       <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
@@ -276,6 +278,7 @@
       <div><small>الموقع الحالي</small><strong id="sh-loc0" dir="ltr"></strong></div>
     </div>
     <p class="note-box sh-rnote" id="sh-rnote" hidden></p>
+    <p class="note-box sh-rnote" id="sh-onote" hidden></p>
     <div class="sh-entries" id="sh-entries" hidden></div>
 
     <label class="field">
@@ -292,6 +295,7 @@
         </button>
       </div>
       <div class="diff" id="sh-diff"></div>
+      <button type="button" class="btn ghost block verify-btn" id="sh-verify" hidden>✓ العد السابق صحيح — تأكيد</button>
     </label>
 
     <label class="field">
@@ -391,6 +395,48 @@
       <button class="btn primary block" id="us-save">حفظ المستخدم</button>
       <button class="btn ghost danger" id="us-delete" hidden>حذف المستخدم</button>
     </div>
+  </div>
+</div>
+
+<!-- ============ فتح / تعديل جرد (جولة) ============ -->
+<div class="sheet-backdrop" id="round-backdrop" hidden>
+  <div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="rd-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h3 id="rd-title">فتح جرد جديد</h3>
+      <button class="icon-btn sm" data-close="round-backdrop" aria-label="إغلاق">
+        <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <label class="field"><span>الفرع</span><select id="rd-branch"></select></label>
+    <div class="loc-inputs">
+      <label class="field"><span>من موقع</span><input id="rd-from" dir="ltr" placeholder="B001" autocapitalize="characters" autocomplete="off"></label>
+      <span class="loc-arrow">←</span>
+      <label class="field"><span>إلى <small class="muted">(اختياري)</small></span><input id="rd-to" dir="ltr" placeholder="B100" autocapitalize="characters" autocomplete="off"></label>
+    </div>
+    <p class="loc-preview" id="rd-preview"></p>
+    <div class="field"><span>أو اختر رف كامل ثم عدّل الأرقام</span></div>
+    <div class="loc-prefixes" id="rd-prefixes"></div>
+    <label class="field"><span>اسم الجرد <small class="muted">(اختياري)</small></span><input id="rd-name" autocomplete="off" placeholder="مثال: رف B الأسبوع الأول"></label>
+    <div class="field"><span>الموظفين <small class="muted">(بدون تحديد = كل الموظفين المسموح لهم بالفرع)</small></span>
+      <div class="uchks" id="rd-users"></div></div>
+    <p class="error" id="rd-error" hidden></p>
+    <button class="btn primary block" id="rd-save">حفظ وفتح الجرد</button>
+  </div>
+</div>
+
+<!-- ============ تقرير نهاية الجرد ============ -->
+<div class="sheet-backdrop" id="report-backdrop" hidden>
+  <div class="sheet wide xwide" role="dialog" aria-modal="true" aria-labelledby="rp-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h3 id="rp-title">التقرير</h3>
+      <button class="icon-btn sm" data-close="report-backdrop" aria-label="إغلاق">
+        <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="rp-body"></div>
+    <button class="btn ghost block" id="rp-export">تصدير التقرير (Excel)</button>
   </div>
 </div>
 
