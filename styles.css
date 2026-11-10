@@ -87,22 +87,87 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .error { color: var(--danger); font-size: 14px; margin: -4px 0 12px; }
 
 /* ---------- تسجيل الدخول ---------- */
-#screen-login { justify-content: center; background: linear-gradient(180deg, var(--primary) 0 38%, var(--bg) 38%); }
-.login-wrap { width: 100%; max-width: 420px; margin: 0 auto; padding: 24px 16px; }
-.login-brand { text-align: center; color: #fff; margin-bottom: 22px; }
-.login-brand .logo {
-  width: 68px; height: 68px; margin: 0 auto 12px; border-radius: 20px; display: grid; place-items: center;
-  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+#screen-login {
+  position: relative; overflow: hidden; justify-content: center; isolation: isolate;
+  background:
+    radial-gradient(120% 70% at 50% -10%, #1d4f7c 0%, transparent 60%),
+    linear-gradient(170deg, #0f2a44 0%, #0a1d31 55%, #071422 100%);
 }
-.login-brand .logo svg { width: 34px; height: 34px; stroke: var(--accent); }
-.login-brand h1 { margin: 0 0 4px; font-size: 24px; }
-.login-brand p { margin: 0; opacity: .75; font-size: 14px; }
-[data-theme="dark"] #screen-login { background: linear-gradient(180deg, #102236 0 38%, var(--bg) 38%); }
-.login-card { padding: 22px 18px; }
-.pw { position: relative; }
-.pw input { padding-left: 48px; }
-.pw-toggle { position: absolute; left: 6px; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; display: grid; place-items: center; color: var(--muted); }
+/* شبكة رفوف خفيفة + إضاءة */
+.lg-bg { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.lg-bg::before {
+  content: ""; position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size: 44px 30px, 44px 30px;
+  -webkit-mask-image: radial-gradient(ellipse 85% 60% at 50% 20%, #000 20%, transparent 75%);
+          mask-image: radial-gradient(ellipse 85% 60% at 50% 20%, #000 20%, transparent 75%);
+}
+.lg-glow { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .55; }
+.lg-glow.g1 { width: 320px; height: 320px; top: -90px; left: 50%; margin-left: -160px; background: #2b6aa3; }
+.lg-glow.g2 { width: 260px; height: 260px; bottom: -110px; right: -80px; background: #e8a33d; opacity: .22; }
+.login-wrap { width: 100%; max-width: 400px; margin: 0 auto; padding: calc(28px + var(--safe-t)) 18px calc(20px + var(--safe-b)); }
+.login-brand { text-align: center; color: #fff; margin-bottom: 22px; }
+.lg-logo { width: 88px; height: 88px; margin: 0 auto 14px; border-radius: 24px; filter: drop-shadow(0 14px 28px rgba(0,0,0,.45)); animation: lgFloat 6s ease-in-out infinite; }
+.lg-logo img { width: 100%; height: 100%; display: block; }
+.login-brand h1 { margin: 0; font-size: 27px; font-weight: 700; letter-spacing: -.2px; }
+.lg-tag { margin: 8px 0 0; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,.66); }
+.lg-tag i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
+.login-card {
+  background: var(--surface); border-radius: 22px; padding: 24px 20px 20px;
+  box-shadow: 0 24px 60px rgba(3, 10, 20, .45), 0 0 0 1px rgba(255,255,255,.06);
+}
+.login-card h2 { margin: 0; font-size: 20px; }
+.lg-sub { margin: 4px 0 18px; color: var(--muted); font-size: 14px; }
+.lg-field {
+  position: relative; display: flex; align-items: center; gap: 4px; height: 56px; margin-bottom: 12px; padding: 0 6px 0 4px;
+  border: 1.5px solid var(--line); background: var(--surface-2); border-radius: 15px; transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.lg-field:focus-within { border-color: var(--primary-2); background: var(--surface); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-2) 16%, transparent); }
+.lg-field > svg { width: 20px; height: 20px; margin: 0 10px 0 4px; color: var(--muted); flex: none; }
+.lg-field:focus-within > svg { color: var(--primary-2); }
+.lg-field input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font-size: 17px; }
+.lg-field input::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+#login-pass { text-align: right; letter-spacing: 3px; font-variant-numeric: tabular-nums; }
+#login-pass::placeholder { letter-spacing: 0; }
+.lg-mini { height: 30px; padding: 0 9px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.pw-toggle { width: 40px; height: 40px; display: grid; place-items: center; color: var(--muted); border-radius: 10px; }
 .pw-toggle svg { width: 20px; height: 20px; }
+.lg-btn {
+  width: 100%; height: 56px; margin-top: 4px; border-radius: 15px; display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-size: 17px; font-weight: 700; color: #1d1405;
+  background: linear-gradient(180deg, #f5bb5c 0%, #e8a33d 55%, #dd9128 100%);
+  box-shadow: 0 10px 22px rgba(232, 163, 61, .35), inset 0 1px 0 rgba(255,255,255,.45);
+  transition: transform .1s, filter .15s;
+}
+.lg-btn:active { transform: scale(.985); }
+.lg-btn svg { width: 20px; height: 20px; stroke-width: 2.4; }
+.lg-btn:disabled { filter: saturate(.6) brightness(.95); }
+.lg-btn:disabled span::after { content: "…"; }
+.lg-btn:disabled svg { animation: lgSpin .8s linear infinite; }
+.login-card .error { margin: 2px 2px 12px; font-size: 13.5px; }
+.login-card.shake { animation: lgShake .4s; }
+/* آخر مستخدم على الجهاز */
+.last-user {
+  width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: -4px 0 14px; text-align: right;
+  border-radius: 15px; border: 1.5px dashed color-mix(in srgb, var(--primary-2) 40%, transparent); background: color-mix(in srgb, var(--primary-2) 6%, transparent);
+}
+.lu-av { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-weight: 700; font-size: 17px; color: #fff; background: linear-gradient(135deg, #2b6aa3, #0f2a44); flex: none; }
+.lu-t { flex: 1; min-width: 0; } .lu-t small { display: block; font-size: 11.5px; color: var(--muted); } .lu-t b { font-size: 15.5px; }
+.last-user > svg { width: 18px; height: 18px; color: var(--muted); }
+.lg-foot { text-align: center; margin: 18px 0 0; font-size: 12px; color: rgba(255,255,255,.4); }
+/* دخول الشاشة بحركة خفيفة */
+.screen.active .login-brand, .screen.active .login-card, .screen.active .lg-foot { animation: lgUp .6s cubic-bezier(.2,.7,.2,1) both; }
+.screen.active .login-card { animation-delay: .08s; }
+.screen.active .lg-foot { animation-delay: .16s; }
+@keyframes lgUp { from { opacity: 0; transform: translateY(14px); } }
+@keyframes lgFloat { 50% { transform: translateY(-5px); } }
+@keyframes lgSpin { to { transform: rotate(-360deg); } }
+@keyframes lgShake { 20%, 60% { transform: translateX(-7px); } 40%, 80% { transform: translateX(7px); } }
+@media (prefers-reduced-motion: reduce) { .lg-logo, .screen.active .login-brand, .screen.active .login-card, .screen.active .lg-foot { animation: none; } }
+@media (max-height: 640px) { .lg-logo { width: 64px; height: 64px; margin-bottom: 8px; } .login-brand { margin-bottom: 14px; } .login-brand h1 { font-size: 23px; } }
+/* الكيبورد مفتوح: نصغّر الشعار عشان الحقول تبان */
+body.kb .lg-logo, body.kb .lg-tag { display: none; }
+body.kb .login-brand { margin-bottom: 10px; }
 
 /* ---------- الشريط العلوي ---------- */
 .topbar {
@@ -429,8 +494,7 @@ body.blind .sh-stats { grid-template-columns: repeat(2, 1fr); }
     width: 430px; margin: 0 auto; background: var(--bg);
     box-shadow: 0 0 0 1px var(--line), 0 10px 40px rgba(16, 32, 52, .18);
   }
-  #screen-login { background: linear-gradient(180deg, var(--primary) 0 38%, var(--bg) 38%); }
-  [data-theme="dark"] #screen-login { background: linear-gradient(180deg, #102236 0 38%, var(--bg) 38%); }
+  #screen-login { width: 100%; }   /* شاشة الدخول بعرض الشاشة كامل على الكمبيوتر */
   .sheet { max-width: 430px; }
   .tb-title { max-width: 200px; }
 }

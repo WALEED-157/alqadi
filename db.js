@@ -53,7 +53,17 @@ window.DB = (() => {
   if (sb) sb.auth.onAuthStateChange((ev) => { if (ev !== "INITIAL_SESSION") note("الجلسة: " + ev); });
   // الجلسة موجودة على الجهاز؟ (لو انمسحت = لازم دخول من جديد، حتى لو الملف الشخصي محفوظ)
   const hasSession = () => { try { return !!localStorage.getItem(AUTH_KEY); } catch { return true; } };
-  const emailOf = (u) => `${String(u).trim().toLowerCase()}@${CFG.emailDomain || "inv.local"}`;
+  // اسم الدخول بالعربي: Supabase يقبل إيميل إنجليزي بس، فنحوّل الاسم لمعرّف ثابت مخفي.
+  // نفس الاسم = نفس المعرّف دائماً، ونتسامح بالكتابة (أحمد/احمد، فاطمة/فاطمه، المسافات، التشكيل)
+  const normUser = (u) => String(u ?? "").trim().replace(/\s+/g, " ").toLowerCase()
+    .replace(/[ً-ْـٰ]/g, "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
+    .replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  function loginId(u) {
+    const n = normUser(u);
+    if (/^[a-z0-9._-]+$/.test(n)) return n;                     // الأسماء الإنجليزية القديمة تبقى مثل ما هي
+    return "u" + [...new TextEncoder().encode(n)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  const emailOf = (u) => `${loginId(u)}@${CFG.emailDomain || "inv.local"}`;
 
   const ls = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -309,12 +319,18 @@ window.DB = (() => {
     return q(sb.from("profiles").select("*").order("created_at"));
   }
   async function createUser({ username, name, password, role, blind, active, scope }) {
+    const id = loginId(username);
+    if (id.length > 64) throw new Error("اسم الدخول طويل — خلّه أقصر (15 حرف عربي بالكثير)");
+    let uid;
     try {
-      return await q(sb.rpc("admin_create_user", {
-        p_username: username.toLowerCase(), p_password: password, p_name: name, p_role: role,
+      uid = await q(sb.rpc("admin_create_user", {
+        p_username: id, p_password: password, p_name: name, p_role: role,
         p_blind: !!blind, p_active: active !== false, p_scope: scope || [], p_domain: CFG.emailDomain || "inv.local",
       }));
     } catch (e) { throw new Error(/exists/.test(e.message) ? "exists" : e.message); }
+    // اسم الدخول اللي يشوفه المدير يكون بالعربي (المعرّف المخفي بس للسيرفر)
+    if (id !== normUser(username)) await q(sb.from("profiles").update({ username: String(username).trim().replace(/\s+/g, " ") }).eq("id", uid)).catch(() => {});
+    return uid;
   }
   const updateProfile = (id, fields) => q(sb.from("profiles").update(fields).eq("id", id));
   const setPassword = (uid, pw) => q(sb.rpc("admin_set_password", { uid, pw }));
@@ -393,7 +409,7 @@ window.DB = (() => {
     restore, signIn, signOut, refreshProfile,
     loadItems, get itemsVersion() { return itemsVersion; },
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync, pendingRounds,
-    listProfiles, createUser, updateProfile, setPassword, deleteUser,
+    listProfiles, createUser, updateProfile, setPassword, deleteUser, normUser, loginId,
     replaceAll, upsertItems, searchCatalog, catalogSize, resetCounts, roundEntries,
   };
 })();

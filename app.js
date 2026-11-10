@@ -193,7 +193,7 @@
     }
     return [...map.values()];
   }
-  const findUser = (username) => allUsers().find((u) => u.username.toLowerCase() === String(username).toLowerCase());
+  const findUser = (username) => allUsers().find((u) => window.DB.normUser(u.username) === window.DB.normUser(username));
   const me = () => (CLOUD ? window.DB.profile : state.user ? findUser(state.user.username) : null);
   const myId = () => (CLOUD ? me()?.id : me()?.username);
   const isAdmin = () => me()?.role === "admin";
@@ -246,6 +246,7 @@
 
   /* ---------- التنقل (بدون سجل متصفح — زر الرجوع لا يخرج من التطبيق) ---------- */
   function show(id) {
+    if (id === "login" && state.screen !== "login") renderLastUser();
     state.screen = id;
     $$(".screen").forEach((s) => s.classList.toggle("active", s.id === "screen-" + id));
     window.scrollTo(0, 0);
@@ -343,31 +344,56 @@
   /* ---------- تسجيل الدخول ---------- */
   $("#company-name").textContent = CFG.companyName;
   document.title = CFG.companyName;
-  const loginErr = (m) => { $("#login-error").textContent = m; $("#login-error").hidden = false; };
+  const loginErr = (m) => {
+    $("#login-error").textContent = m; $("#login-error").hidden = false;
+    const c = $("#login-form"); c.classList.remove("shake"); void c.offsetWidth; c.classList.add("shake");
+    navigator.vibrate?.([40, 40, 40]);
+  };
+  // آخر واحد دخل من هالجهاز: زر "متابعة" بدل ما يكتب اسمه كل مرة
+  const LS_LAST = "inv_last_user";
+  function renderLastUser() {
+    const last = store.get(LS_LAST, null);
+    $("#last-user").hidden = !last?.u;
+    if (!last?.u) return;
+    $("#lu-name").textContent = last.name || last.u;
+    $("#lu-av").textContent = (last.name || last.u).trim()[0] || "؟";
+  }
+  renderLastUser();
+  $("#last-user").addEventListener("click", () => {
+    const last = store.get(LS_LAST, null); if (!last) return;
+    $("#login-user").value = last.u;
+    $("#last-user").hidden = true;
+    $("#login-pass").focus();
+  });
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const u = $("#login-user").value.trim().toLowerCase();
-    const p = $("#login-pass").value;
+    const u = $("#login-user").value.trim();
+    const p = toEnDigits($("#login-pass").value);
+    if (!u) { $("#login-user").focus(); return; }
+    if (!p) { $("#login-pass").focus(); return; }
     $("#login-error").hidden = true;
     if (CLOUD) {
       const btn = $("#login-form [type=submit]");
       btn.disabled = true;
       try { await window.DB.signIn(u, p); }
       catch (err) {
-        loginErr(err.message === "bad" ? "اسم المستخدم أو كلمة المرور غير صحيحة"
+        btn.disabled = false;
+        loginErr(err.message === "bad" ? "اسم الدخول أو الرقم السري غير صحيح"
           : err.message === "inactive" ? "الحساب موقوف — راجع المدير"
           : err.message === "net" ? "ما فيه اتصال بالإنترنت" : "تعذّر الدخول: " + err.message);
         return;
-      } finally { btn.disabled = false; }
+      }
+      store.set(LS_LAST, { u, name: window.DB.profile?.name || u });
       // إعادة تحميل مرة وحدة بعد الدخول: بعض الطلبات ما تاخذ الجلسة الجديدة إلا بعد التحديث
       location.replace(location.pathname + "#home");
       location.reload();
       return;
     } else {
-      const found = allUsers().find((x) => x.username.toLowerCase() === u && x.password === p && x.active !== false);
-      if (!found) { loginErr("اسم المستخدم أو كلمة المرور غير صحيحة"); return; }
+      const found = allUsers().find((x) => window.DB.normUser(x.username) === window.DB.normUser(u) && x.password === p && x.active !== false);
+      if (!found) { loginErr("اسم الدخول أو الرقم السري غير صحيح"); return; }
       state.user = { username: found.username, name: found.name };
       store.set(LS_USER, state.user);   // يبقى مسجّل دخول دائماً حتى يضغط خروج
+      store.set(LS_LAST, { u, name: found.name });
     }
     $("#login-pass").value = "";
     state.branch = null;
@@ -376,6 +402,15 @@
   $("#pw-toggle").addEventListener("click", () => {
     const i = $("#login-pass");
     i.type = i.type === "password" ? "text" : "password";
+    i.focus();
+  });
+  // الرقم السري: كيبورد أرقام افتراضياً، وزر للتبديل للحروف
+  $("#kb-toggle").addEventListener("click", () => {
+    const i = $("#login-pass");
+    const num = i.inputMode === "numeric";
+    i.inputMode = num ? "text" : "numeric";
+    $("#kb-toggle").textContent = num ? "123" : "أبج";
+    i.blur(); setTimeout(() => i.focus(), 50);
   });
   $("#logout-btn").addEventListener("click", async () => {
     const pend = window.DB.getStatus().pending;
@@ -1875,7 +1910,7 @@
     $("#us-builtin").hidden = !u?.builtin;
     ["#us-name", "#us-pass", "#us-role", "#us-active"].forEach((s) => ($(s).disabled = !!u?.builtin));
     if (self) { $("#us-role").disabled = true; $("#us-active").disabled = true; }
-    $("#us-pass").placeholder = CLOUD && u ? "اتركها فاضية = بدون تغيير" : CLOUD ? "6 أحرف على الأقل" : "";
+    $("#us-pass").placeholder = CLOUD && u ? "اتركها فاضية = بدون تغيير" : CLOUD ? "4 أرقام أو أكثر — مثال: 1234" : "";
     $("#us-error").hidden = true;
     updateRoleUI();
     openOverlay("user-backdrop");
@@ -1896,8 +1931,8 @@
     const username = $("#us-username").value.trim();
     const password = $("#us-pass").value;
     if (!name) return err("اكتب الاسم");
-    if (!/^[A-Za-z0-9_.\-]{2,}$/.test(username)) return err("اسم المستخدم: حروف إنجليزية أو أرقام (حرفين على الأقل)");
-    const minPw = CLOUD ? 6 : 3;
+    if (!/^[\u0600-\u06FFA-Za-z0-9 _.\-]{2,15}$/.test(username.trim())) return err("اسم الدخول: عربي أو إنجليزي، من 2 إلى 15 حرف (مثال: أحمد)");
+    const minPw = CLOUD ? 4 : 3;
     if ((!CLOUD || !editingUser || password) && password.length < minPw) return err(`كلمة المرور قصيرة (${minPw} أحرف على الأقل)`);
     if (!editingUser && findUser(username)) return err("اسم المستخدم موجود مسبقاً");
     const role = $("#us-role").value;
@@ -1917,7 +1952,7 @@
         } else await window.DB.createUser({ username, password, ...fields });
       } catch (e) {
         return err(e.message === "exists" ? "اسم المستخدم موجود مسبقاً"
-          : /too short/i.test(e.message) ? "كلمة المرور قصيرة (6 أحرف على الأقل)"
+          : /too short/i.test(e.message) ? "كلمة المرور قصيرة (4 أرقام على الأقل)"
           : "تعذّر الحفظ: " + e.message);
       } finally { btn.disabled = false; }
       closeOverlay("user-backdrop");
@@ -2229,8 +2264,9 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "16";
+  const APP_VER = "17";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
+  $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 
   /* ---------- الوضع النهاري / الليلي ---------- */
   function setTheme(t) {
