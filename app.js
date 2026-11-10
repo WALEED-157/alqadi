@@ -695,6 +695,9 @@
       if (it?.x && !countOf(it)) { removeExtraIfEmpty(it); applyFilter(); }   // صنف زائد انضاف بدون جرد
       if (state.needReload) setTimeout(runSync, 300);
     }
+    if (state.reloadOnClose && !$$(".sheet-backdrop:not([hidden])").length) {
+      const f = state.reloadOnClose; state.reloadOnClose = null; setTimeout(f, 200);
+    }
   }
   $$(".sheet-backdrop").forEach((bd) => bd.addEventListener("click", (e) => {
     if (e.target === bd) closeOverlay(bd.id);
@@ -2019,8 +2022,18 @@
 
   /* ---------- PWA ---------- */
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
+    // نسخة جديدة نزلت: نعيد تحميل الصفحة مرة وحدة (ولو فيه نافذة جرد مفتوحة ننتظر لين تنقفل)
+    let hadCtrl = !!navigator.serviceWorker.controller, reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadCtrl) { hadCtrl = true; return; }        // أول تثبيت — ما يحتاج
+      if (reloading) return;
+      const go2 = () => { if (reloading) return; reloading = true; location.reload(); };
+      if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
+    });
   }
+  const APP_VER = "10";
+  $("#app-ver").textContent = "الإصدار " + APP_VER;
 
   /* ---------- الوضع النهاري / الليلي ---------- */
   function setTheme(t) {

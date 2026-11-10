@@ -555,3 +555,4 @@ body.review #extra-btn { display: none; }
   #tab-rounds { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; align-items: start; }
   #tab-rounds > .btn, #tab-rounds > .sec, #tab-rounds > .pad { grid-column: 1 / -1; }
 }
+.app-ver { text-align: center; font-size: 11.5px; color: var(--muted); margin-top: 6px; }
