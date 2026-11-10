@@ -8,10 +8,28 @@ window.DB = (() => {
   const CFG = window.APP_CONFIG || {};
   const on = !!(CFG.supabaseUrl && CFG.supabaseKey && window.supabase);
   const AUTH_KEY = "inv-auth";
+  // سجل تشخيص (آخر 40 حدث) — يطلع بالضغط على نقطة الاتصال
+  const log = [];
+  const note = (m) => { log.push(`${new Date().toLocaleTimeString("en-GB")} ${m}`); if (log.length > 40) log.shift(); };
+  // سجل ما قبل إعادة التحميل التلقائي (عشان ما يضيع السبب)
+  try { const old = JSON.parse(localStorage.getItem("inv_diag_log") || "[]"); log.push(...old.slice(-25)); localStorage.removeItem("inv_diag_log"); } catch {}
+  // كل طلب لـ Supabase له حد أقصى: مكتبة Supabase تحط كل الطلبات بطابور واحد خلف "تجديد الجلسة"،
+  // ولو طلب تجديد علّق (الجوال صحى من النوم / تغيّرت الشبكة) يعلّق كل شيء لين تحديث الصفحة.
+  // مع الحد: الطلب المعلّق ينقطع، الطابور يتحرر، والمحاولة اللي بعدها تنجح.
+  function tfetch(url, opts = {}) {
+    const u = String(url);
+    const ms = u.includes("/auth/v1/") ? 15000 : u.includes("get_items") || u.includes("/catalog") ? 120000 : 45000;
+    const ctl = new AbortController();
+    const t = setTimeout(() => { ctl.abort(); note(`انقطع طلب معلّق (${Math.round(ms / 1000)}ث): ${u.replace(/^https?:\/\/[^/]+/, "").slice(0, 60)}`); }, ms);
+    if (opts.signal) { if (opts.signal.aborted) ctl.abort(); else opts.signal.addEventListener("abort", () => ctl.abort()); }
+    return fetch(url, { ...opts, signal: ctl.signal }).finally(() => clearTimeout(t));
+  }
   const sb = on ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, {
     // القفل الافتراضي (navigator.locks) ضروري: يمنع تابين يجددون الجلسة بنفس الوقت ويطلع المستخدم
     auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_KEY },
+    global: { fetch: tfetch },
   }) : null;
+  if (sb) sb.auth.onAuthStateChange((ev) => { if (ev !== "INITIAL_SESSION") note("الجلسة: " + ev); });
   // الجلسة موجودة على الجهاز؟ (لو انمسحت = لازم دخول من جديد، حتى لو الملف الشخصي محفوظ)
   const hasSession = () => { try { return !!localStorage.getItem(AUTH_KEY); } catch { return true; } };
   const emailOf = (u) => `${String(u).trim().toLowerCase()}@${CFG.emailDomain || "inv.local"}`;
@@ -59,7 +77,7 @@ window.DB = (() => {
   // خطأ شبكة/جلسة = نعيد المحاولة لاحقاً. غيره = خطأ دائم
   const retryable = (status) => !status || status === 401 || status === 408 || status === 429 || status >= 500;
   // كل طلب له حد أقصى عشان ما يعلّق المزامنة
-  async function q(promise, ms = 25000) {
+  async function q(promise, ms = 50000) {
     let t;
     const timeout = new Promise((_, rej) => { t = setTimeout(() => { const e = new Error("timeout"); e.status = 0; rej(e); }, ms); });
     try {
@@ -128,7 +146,7 @@ window.DB = (() => {
       }
     }
     let data;
-    try { data = await q(sb.rpc("get_items")); }
+    try { data = await q(sb.rpc("get_items"), 125000); }
     catch (e) { if (cached) { itemsVersion = cached.version; return cached; } throw e; }
     data = { version: data.version ?? null, items: data.items || [] };
     await idb.set(ITEMS_KEY, data).catch(() => {});
@@ -150,11 +168,14 @@ window.DB = (() => {
   const emit = () => listeners.forEach((f) => { try { f(getStatus()); } catch {} });
   // كل عملية مربوطة بصاحبها: لو طلع من حسابه تبقى محفوظة وتترفع لما يرجع يدخل
   const mine = (o) => !o.uid || o.uid === profile?.id;
-  const getStatus = () => ({ ...status, pending: outbox.filter(mine).length, others: outbox.filter((o) => !mine(o)).length, cloud: on });
+  const getStatus = () => ({ ...status, pending: outbox.filter(mine).length, others: outbox.filter((o) => !mine(o)).length, cloud: on,
+    // أقدم عملية معلّقة من كم؟ (للمراقب اللي يصلّح التعليق تلقائياً)
+    oldestPending: Math.min(...outbox.filter(mine).map((o) => o.qt || Date.now()), Date.now()) });
 
   function queue(op) {
     if (!on) return;
     op.uid = profile?.id;
+    op.qt = Date.now();
     outbox.push(op);
     ls.set(K.outbox, outbox);
     emit();
@@ -193,16 +214,23 @@ window.DB = (() => {
           const batch = list.slice(0, k);
           try {
             await runOps(type, batch);
-            status.online = true; status.error = "";
+            status.online = true; status.error = ""; status.okAt = Date.now();
+            note(`رفع ${batch.length} (${type}) ✓`);
           } catch (e0) {
             let e = e0;
             console.warn("sync", type, e.status, e.message);
+            note(`فشل رفع (${type}) ${e.status ?? ""}: ${String(e.message).slice(0, 80)}`);
             if (e.status === 401 || e.status === 403) {
               // غالباً الجلسة انتهت: نجدّدها ونعيد مرة. لو ما تجددت = دخول من جديد
               const { error } = await sb.auth.refreshSession().catch((er) => ({ error: er }));
               if (error && !hasSession()) { checkSession(); throw e; }
               try { await runOps(type, batch); e = null; } catch (e2) { e = e2; }
-              if (e && e.status === 401) { status.error = `رفض السيرفر (401): ${e.message}`; throw e; }
+              if (e && e.status === 401) {
+                // الجلسة المحفوظة خربانة (السيرفر يعاملنا كزائر حتى بعد التجديد): نطلب دخول من جديد بدل ما نعيد للأبد
+                status.needLogin = true; status.error = "انتهت جلسة الدخول — سجّل دخول من جديد";
+                await sb.auth.signOut({ scope: "local" }).catch(() => {});
+                emit(); throw e;
+              }
               // 403 بعد تجديد الجلسة = ما عنده صلاحية لهالعملية: نتجاوزها عشان ما توقف الباقي
               if (e) status.error = `عملية مرفوضة وتم تجاوزها (${e.status}): ${e.message}`;
             } else if (retryable(e.status)) { status.online = false; status.error = e.message === "timeout" ? "الاتصال بطيء — بنعيد المحاولة" : ""; throw e; }
@@ -225,7 +253,7 @@ window.DB = (() => {
     const since = cur?.server ? new Date(Date.parse(cur.server) - 120000).toISOString() : "1970-01-01T00:00:00Z";
     const ch = await q(sb.rpc("get_changes", { since }));
     ls.set(K.cursor, { server: ch.now, local: Date.now() });
-    status.lastSync = Date.now(); status.online = true;
+    status.lastSync = Date.now(); status.online = true; status.okAt = Date.now();
     ch.itemsChanged = ch.items_version != null && itemsVersion != null && ch.items_version !== itemsVersion;
     return ch;
   }
@@ -336,6 +364,7 @@ window.DB = (() => {
     on, uuid, idb,
     get profile() { return profile; },
     expire() { profile = null; ls.del(K.profile); },   // الجلسة راحت: نرجع لشاشة الدخول ونخلي الطابور
+    log, note,
     restore, signIn, signOut, refreshProfile,
     loadItems, get itemsVersion() { return itemsVersion; },
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync, pendingRounds,

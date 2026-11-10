@@ -576,3 +576,6 @@ body.review #extra-btn { display: none; }
 .qk-table tr.on td { background: color-mix(in srgb, var(--ok-bg) 70%, var(--surface)); }
 .qk-table input { width: 16px; height: 16px; accent-color: var(--primary-2); pointer-events: none; }
 .qk-table td:first-child, .qk-table th:first-child { position: static; }
+.admin-sync { color: #fff; opacity: .9; } .admin-sync .st { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+@media (max-width: 899px) { .admin-sync .st { display: none; } }
+.diag { white-space: pre-wrap; direction: rtl; text-align: right; font: 12px/1.7 ui-monospace, Consolas, monospace; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; max-height: 55dvh; overflow: auto; margin: 0 0 8px; }

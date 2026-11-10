@@ -1194,7 +1194,34 @@
     $$(".sync-ind").forEach((el) => { el.hidden = false; el.dataset.st = st; el.title = syncTxt; const t = el.querySelector(".st"); if (t) t.textContent = syncTxt; });
   }
   // الضغط على النقطة: يعرض الحالة بالتفصيل ويعيد المحاولة
-  $$(".sync-ind").forEach((el) => el.addEventListener("click", () => { toast(syncTxt, 4000); runSync(); }));
+  // الضغط على النقطة: الحالة + سجل التشخيص (صوّره لو فيه مشكلة)
+  $$(".sync-ind").forEach((el) => el.addEventListener("click", () => {
+    const s = window.DB.getStatus();
+    $("#diag-body").textContent = [
+      syncTxt,
+      `الإصدار ${APP_VER} · ${navigator.onLine ? "فيه نت" : "بدون نت"} · بانتظار الرفع: ${s.pending}${s.others ? ` · لحساب ثاني: ${s.others}` : ""}`,
+      `آخر نجاح: ${s.okAt ? new Date(s.okAt).toLocaleTimeString("en-GB") : "—"} · الجلسة: ${localStorage.getItem("inv-auth") ? "موجودة" : "مفقودة"}`,
+      "", ...window.DB.log.slice().reverse(),
+    ].join("\n");
+    openOverlay("diag-backdrop");
+    runSync();
+  }));
+
+  // المراقب: لو فيه جرد معلّق أكثر من دقيقتين وفيه نت — نصلّحه تلقائياً بإعادة تحميل الصفحة (نفس اللي كان يحل المشكلة يدوياً)
+  setInterval(() => {
+    if (!CLOUD || !me() || document.visibilityState !== "visible" || !navigator.onLine) return;
+    const s = window.DB.getStatus();
+    if (!s.pending) return;
+    const stuck = Date.now() - Math.max(s.oldestPending, s.okAt || 0);
+    if (stuck > 45000) runSync();
+    if (stuck < 120000 || $$(".sheet-backdrop:not([hidden])").length) return;
+    let last = 0; try { last = +sessionStorage.getItem("inv_autoreload") || 0; } catch {}
+    if (Date.now() - last < 5 * 60000) return;             // مرة كل 5 دقايق بالكثير
+    try { sessionStorage.setItem("inv_autoreload", Date.now()); } catch {}
+    window.DB.note("المراقب: الرفع معلّق — إعادة تحميل تلقائي");
+    try { localStorage.setItem("inv_diag_log", JSON.stringify(window.DB.log)); } catch {}
+    location.reload();
+  }, 15000);
   window.DB.onStatus(renderSync);
   // المدير: لما تنرفع جولة نشيل علامة "لسا ما انرفع"
   let lastPendRounds = 0;
@@ -2202,7 +2229,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "12";
+  const APP_VER = "14";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
 
   /* ---------- الوضع النهاري / الليلي ---------- */

@@ -105,7 +105,7 @@
 <!-- ============ لوحة التحكم ============ -->
 <section id="screen-admin" class="screen">
   <header class="topbar">
-    <span class="tb-side tb-right">الرئيسية</span>
+    <span class="tb-side tb-right"><small class="sync-ind admin-sync" hidden><i></i><span class="st"></span></small></span>
     <span class="tb-title">لوحة التحكم</span>
     <button class="tb-side tb-left back-btn" data-back="home" aria-label="رجوع">
       رجوع
@@ -504,6 +504,21 @@
     <div class="imp-progress" id="imp-progress" hidden><span id="imp-bar"></span><b id="imp-ptext"></b></div>
     <p class="error" id="imp-error" hidden></p>
     <button class="btn primary block" id="imp-apply" hidden>تأكيد ورفع</button>
+  </div>
+</div>
+
+<!-- ============ حالة الاتصال (تشخيص) ============ -->
+<div class="sheet-backdrop" id="diag-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="diag-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h3 id="diag-title">حالة الاتصال</h3>
+      <button class="icon-btn sm" data-close="diag-backdrop" aria-label="إغلاق">
+        <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <pre class="diag" id="diag-body"></pre>
+    <p class="hint">لو فيه مشكلة صوّر هذي الشاشة وأرسلها</p>
   </div>
 </div>
 
