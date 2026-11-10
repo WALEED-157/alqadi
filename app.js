@@ -1006,13 +1006,23 @@
   document.addEventListener("visibilitychange", runSync);
 
   // مؤشر الاتصال
+  let syncTxt = "";
   function renderSync(s) {
     if (!s.cloud) return;
-    const st = s.pending ? "pend" : !s.online ? "off" : "ok";
-    const txt = s.pending ? `${s.pending} بانتظار الرفع${s.online ? "…" : " (بدون إنترنت)"}`
+    if (s.needLogin && me()) {
+      // الجلسة انتهت: نطلب دخول من جديد — الجرد اللي ما انرفع محفوظ وينرفع بعد الدخول
+      window.DB.expire();
+      $("#login-error").textContent = `انتهت جلسة الدخول — سجّل دخول مرة ثانية${s.pending ? ` (عندك ${s.pending} جرد محفوظ بينرفع بعد الدخول)` : ""}`;
+      $("#login-error").hidden = false;
+      go("home");
+    }
+    const st = s.error && s.pending ? "err" : s.pending ? "pend" : !s.online ? "off" : "ok";
+    syncTxt = s.pending ? `${s.pending} بانتظار الرفع${s.online ? "…" : " (بدون إنترنت)"}${s.error ? " — " + s.error : ""}`
       : !s.online ? "غير متصل — الجرد ينحفظ على الجهاز" : "متصل ✓ كل الجرد مرفوع";
-    $$(".sync-ind").forEach((el) => { el.hidden = false; el.dataset.st = st; el.title = txt; const t = el.querySelector(".st"); if (t) t.textContent = txt; });
+    $$(".sync-ind").forEach((el) => { el.hidden = false; el.dataset.st = st; el.title = syncTxt; const t = el.querySelector(".st"); if (t) t.textContent = syncTxt; });
   }
+  // الضغط على النقطة: يعرض الحالة بالتفصيل ويعيد المحاولة
+  $$(".sync-ind").forEach((el) => el.addEventListener("click", () => { toast(syncTxt, 4000); runSync(); }));
   window.DB.onStatus(renderSync);
   renderSync(window.DB.getStatus());
 

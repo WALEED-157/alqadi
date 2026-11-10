@@ -486,3 +486,5 @@ body.blind .sh-stats { grid-template-columns: repeat(2, 1fr); }
 .t-q .rsv { display: block; font-size: 10.5px; color: var(--warn); font-weight: 600; white-space: nowrap; }
 body.blind .t-q .rsv { display: none; }
 .sh-rnote { margin: -4px 0 10px; font-size: 12.5px; }
+.sync-ind { cursor: pointer; }
+.sync-ind[data-st="err"] i { background: #e5484d; animation: pulse 1.2s infinite; }

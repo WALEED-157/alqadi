@@ -7,9 +7,13 @@ window.DB = (() => {
   "use strict";
   const CFG = window.APP_CONFIG || {};
   const on = !!(CFG.supabaseUrl && CFG.supabaseKey && window.supabase);
+  const AUTH_KEY = "inv-auth";
   const sb = on ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, {
-    auth: { persistSession: true, autoRefreshToken: true, storageKey: "inv-auth" },
+    // lock بسيط: قفل المتصفح الافتراضي أحياناً يعلّق الطلبات للأبد على الجوال
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_KEY, lock: async (_n, _t, fn) => fn() },
   }) : null;
+  // الجلسة موجودة على الجهاز؟ (لو انمسحت = لازم دخول من جديد، حتى لو الملف الشخصي محفوظ)
+  const hasSession = () => { try { return !!localStorage.getItem(AUTH_KEY); } catch { return true; } };
   const emailOf = (u) => `${String(u).trim().toLowerCase()}@${CFG.emailDomain || "inv.local"}`;
 
   const ls = {
@@ -54,10 +58,15 @@ window.DB = (() => {
 
   // خطأ شبكة/جلسة = نعيد المحاولة لاحقاً. غيره = خطأ دائم
   const retryable = (status) => !status || status === 401 || status === 408 || status === 429 || status >= 500;
-  async function q(promise) {
-    const { data, error, status } = await promise;
-    if (error) { const e = new Error(error.message || "error"); e.status = status; e.code = error.code; throw e; }
-    return data;
+  // كل طلب له حد أقصى عشان ما يعلّق المزامنة
+  async function q(promise, ms = 25000) {
+    let t;
+    const timeout = new Promise((_, rej) => { t = setTimeout(() => { const e = new Error("timeout"); e.status = 0; rej(e); }, ms); });
+    try {
+      const { data, error, status } = await Promise.race([promise, timeout]);
+      if (error) { const e = new Error(error.message || "error"); e.status = status; e.code = error.code; throw e; }
+      return data;
+    } finally { clearTimeout(t); }
   }
 
   /* ---------- الدخول ---------- */
@@ -85,11 +94,14 @@ window.DB = (() => {
     }
     const p = await fetchProfile(data.user.id);
     if (!p || !p.active) { await sb.auth.signOut().catch(() => {}); throw new Error("inactive"); }
+    status.needLogin = false; status.error = "";
+    emit(); scheduleFlush();
     return p;
   }
   async function signOut() {
     profile = null; ls.del(K.profile);
-    if (on) await sb.auth.signOut().catch(() => {});
+    status.needLogin = false; status.error = "";
+    if (on) await sb.auth.signOut({ scope: "local" }).catch(() => {});
   }
   const refreshProfile = () => (on && profile ? fetchProfile(profile.id) : Promise.resolve(profile));
 
@@ -127,7 +139,14 @@ window.DB = (() => {
   /* ---------- رفع الجرد (طابور يشتغل بدون نت) ---------- */
   let outbox = ls.get(K.outbox, []);
   const listeners = new Set();
-  const status = { online: navigator.onLine, syncing: false, lastSync: ls.get(K.cursor, null)?.local || 0, error: "" };
+  const status = { online: navigator.onLine, syncing: false, lastSync: ls.get(K.cursor, null)?.local || 0, error: "", needLogin: false };
+  // الجلسة راحت: نوقف ونطلب دخول (الجرد اللي ما انرفع يبقى محفوظ باسم صاحبه)
+  function checkSession() {
+    if (hasSession()) return true;
+    status.needLogin = true; status.error = "انتهت جلسة الدخول — سجّل دخول من جديد";
+    emit();
+    return false;
+  }
   const emit = () => listeners.forEach((f) => { try { f(getStatus()); } catch {} });
   // كل عملية مربوطة بصاحبها: لو طلع من حسابه تبقى محفوظة وتترفع لما يرجع يدخل
   const mine = (o) => !o.uid || o.uid === profile?.id;
@@ -162,6 +181,7 @@ window.DB = (() => {
     return (flushing ||= (async () => {
       try {
         for (;;) {
+          if (!checkSession()) { const e = new Error("needLogin"); e.status = 401; throw e; }
           const list = outbox.filter(mine);
           if (!list.length) break;
           const type = list[0].t;
@@ -172,8 +192,16 @@ window.DB = (() => {
             await runOps(type, batch);
             status.online = true; status.error = "";
           } catch (e) {
-            if (retryable(e.status)) { status.online = false; throw e; }
-            console.warn("sync drop", type, e); status.error = e.message;   // مرفوض نهائياً (صلاحيات مثلاً)
+            console.warn("sync", type, e.status, e.message);
+            if (e.status === 401 || e.status === 403) {
+              // غالباً الجلسة انتهت: نجدّدها ونعيد. لو ما تجددت = دخول من جديد
+              const { error } = await sb.auth.refreshSession().catch((er) => ({ error: er }));
+              if (error && !hasSession()) checkSession();
+              status.error = `رفض السيرفر (${e.status}): ${e.message}`;
+              throw e;
+            }
+            if (retryable(e.status)) { status.online = false; status.error = e.message === "timeout" ? "الاتصال بطيء — بنعيد المحاولة" : ""; throw e; }
+            status.error = `خطأ (${e.status}): ${e.message}`;   // مرفوض نهائياً
           }
           const done = new Set(batch);
           outbox = outbox.filter((o) => !done.has(o));
@@ -187,6 +215,7 @@ window.DB = (() => {
   // سحب التغييرات من السيرفر (مع تداخل دقيقتين عشان ما يفوتنا شيء)
   async function pull() {
     if (!on || !profile) return null;
+    if (!checkSession()) return null;      // بدون جلسة السيرفر يرجع فاضي — ما نحرّك المؤشر
     const cur = ls.get(K.cursor, null);
     const since = cur?.server ? new Date(Date.parse(cur.server) - 120000).toISOString() : "1970-01-01T00:00:00Z";
     const ch = await q(sb.rpc("get_changes", { since }));
@@ -204,7 +233,8 @@ window.DB = (() => {
       const ch = await pull();
       if (ch) apply(ch);
     } catch (e) {
-      if (retryable(e.status)) status.online = false;
+      if (e.status === 401 || e.status === 403) { /* الرسالة انكتبت في flush */ }
+      else if (retryable(e.status)) status.online = false;
       else status.error = e.message;
     } finally { status.syncing = false; emit(); }
   }
@@ -295,6 +325,7 @@ window.DB = (() => {
   return {
     on, uuid, idb,
     get profile() { return profile; },
+    expire() { profile = null; ls.del(K.profile); },   // الجلسة راحت: نرجع لشاشة الدخول ونخلي الطابور
     restore, signIn, signOut, refreshProfile,
     loadItems, get itemsVersion() { return itemsVersion; },
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync,
