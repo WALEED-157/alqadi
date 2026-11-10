@@ -2229,7 +2229,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "15";
+  const APP_VER = "16";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
 
   /* ---------- الوضع النهاري / الليلي ---------- */

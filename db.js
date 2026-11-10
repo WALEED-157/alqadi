@@ -223,7 +223,10 @@ window.DB = (() => {
   let flushing = null;
   function flush() {
     if (!on || !profile) return Promise.resolve();
-    return (flushing ||= (async () => {
+    if (flushing) return flushing;
+    // ⚠️ لازم نحفظ الوعد قبل ما يخلص: لو الطابور فاضي الدالة تخلص فوراً،
+    // ولو كان المسح داخلها (finally) كان يصير قبل الحفظ ويبقى وعد منتهي للأبد = ولا رفع بعده
+    flushing = (async () => {
       try {
         for (;;) {
           if (!checkSession()) { const e = new Error("needLogin"); e.status = 401; throw e; }
@@ -262,8 +265,9 @@ window.DB = (() => {
           ls.set(K.outbox, outbox);
           emit();
         }
-      } finally { flushing = null; emit(); }
-    })());
+      } finally { emit(); }
+    })().finally(() => { flushing = null; emit(); });
+    return flushing;
   }
 
   // سحب التغييرات من السيرفر (مع تداخل دقيقتين عشان ما يفوتنا شيء)
