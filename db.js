@@ -24,9 +24,30 @@ window.DB = (() => {
     if (opts.signal) { if (opts.signal.aborted) ctl.abort(); else opts.signal.addEventListener("abort", () => ctl.abort()); }
     return fetch(url, { ...opts, signal: ctl.signal }).finally(() => clearTimeout(t));
   }
+  // قفل الجلسة: مشترك بين كل تابات التطبيق (عشان ما يجددون الجلسة بنفس الوقت).
+  // المشكلة: لو تاب ثاني (قديم/نايم بالخلفية) مسك القفل وعلّق، كل التابات تنتظره للأبد — حتى بعد التحديث.
+  // الحل: ننتظر 10 ثواني بالكثير، وبعدها ناخذ القفل منه (steal).
+  async function safeLock(name, acquireTimeout, fn) {
+    if (!globalThis.navigator?.locks?.request) return fn();
+    if (acquireTimeout === 0) {
+      return navigator.locks.request(name, { mode: "exclusive", ifAvailable: true }, async (lock) => {
+        if (!lock) { const e = new Error(`lock "${name}" not available`); e.isAcquireTimeout = true; throw e; }
+        return fn();
+      });
+    }
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), acquireTimeout > 0 ? acquireTimeout : 10000);
+    let got = false;
+    try {
+      return await navigator.locks.request(name, { mode: "exclusive", signal: ctl.signal }, async () => { got = true; clearTimeout(t); return fn(); });
+    } catch (e) {
+      if (got || e?.name !== "AbortError") throw e;
+      note("قفل الجلسة كان معلّق (غالباً تاب ثاني) — أخذناه منه");
+      return navigator.locks.request(name, { mode: "exclusive", steal: true }, () => fn());
+    } finally { clearTimeout(t); }
+  }
   const sb = on ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, {
-    // القفل الافتراضي (navigator.locks) ضروري: يمنع تابين يجددون الجلسة بنفس الوقت ويطلع المستخدم
-    auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_KEY },
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: AUTH_KEY, lock: safeLock },
     global: { fetch: tfetch },
   }) : null;
   if (sb) sb.auth.onAuthStateChange((ev) => { if (ev !== "INITIAL_SESSION") note("الجلسة: " + ev); });
@@ -364,7 +385,7 @@ window.DB = (() => {
     on, uuid, idb,
     get profile() { return profile; },
     expire() { profile = null; ls.del(K.profile); },   // الجلسة راحت: نرجع لشاشة الدخول ونخلي الطابور
-    log, note,
+    log, note, safeLock,
     restore, signIn, signOut, refreshProfile,
     loadItems, get itemsVersion() { return itemsVersion; },
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync, pendingRounds,
