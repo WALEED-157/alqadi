@@ -426,6 +426,42 @@
   </div>
 </div>
 
+<!-- ============ جرد سريع: اختيار الأصناف ============ -->
+<div class="sheet-backdrop" id="quick-backdrop" hidden>
+  <div class="sheet wide xwide" role="dialog" aria-modal="true" aria-labelledby="qk-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <div>
+        <h3 id="qk-title">جرد سريع — اختيار الأصناف</h3>
+        <p class="muted x-sub">ما له علاقة بالمواقع — للتأكيد السريع على أصناف معينة</p>
+      </div>
+      <button class="icon-btn sm" data-close="quick-backdrop" aria-label="إغلاق">
+        <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <label class="field"><span>الفرع</span><select id="qk-branch"></select></label>
+    <div class="field"><span>الفلاتر <small class="muted">(كل الشروط لازم تتحقق · بين القيم <b>،</b> أو كلمة <b>أو</b> = أي وحدة منها)</small></span>
+      <div id="qk-filters"></div>
+      <button type="button" class="btn ghost sm-btn" id="qk-add-filter">+ شرط</button>
+    </div>
+    <details class="qk-paste"><summary>أو الصق أرقام أصناف من Excel</summary>
+      <textarea id="qk-paste" rows="4" dir="ltr" placeholder="رقم في كل سطر"></textarea>
+      <button type="button" class="btn ghost sm-btn" id="qk-paste-add">إضافة للمحدد</button>
+    </details>
+    <div class="qk-bar">
+      <span id="qk-count"></span>
+      <button type="button" class="btn ghost sm-btn" id="qk-all">تحديد كل النتائج</button>
+      <button type="button" class="btn ghost sm-btn" id="qk-none">إلغاء تحديد النتائج</button>
+      <label class="qk-only"><input type="checkbox" id="qk-only"> المحدد فقط</label>
+    </div>
+    <div class="qk-list" id="qk-list"></div>
+    <label class="field"><span>اسم الجرد <small class="muted">(اختياري)</small></span><input id="qk-name" autocomplete="off" placeholder="مثال: تأكيد بواجي"></label>
+    <div class="field"><span>الموظفين <small class="muted">(بدون تحديد = كل الموظفين المسموح لهم بالفرع)</small></span>
+      <div class="uchks" id="qk-users"></div></div>
+    <button class="btn primary block" id="qk-save">إنشاء الجرد السريع</button>
+  </div>
+</div>
+
 <!-- ============ تقرير نهاية الجرد ============ -->
 <div class="sheet-backdrop" id="report-backdrop" hidden>
   <div class="sheet wide xwide" role="dialog" aria-modal="true" aria-labelledby="rp-title">

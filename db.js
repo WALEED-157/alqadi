@@ -194,17 +194,19 @@ window.DB = (() => {
           try {
             await runOps(type, batch);
             status.online = true; status.error = "";
-          } catch (e) {
+          } catch (e0) {
+            let e = e0;
             console.warn("sync", type, e.status, e.message);
             if (e.status === 401 || e.status === 403) {
-              // غالباً الجلسة انتهت: نجدّدها ونعيد. لو ما تجددت = دخول من جديد
+              // غالباً الجلسة انتهت: نجدّدها ونعيد مرة. لو ما تجددت = دخول من جديد
               const { error } = await sb.auth.refreshSession().catch((er) => ({ error: er }));
-              if (error && !hasSession()) checkSession();
-              status.error = `رفض السيرفر (${e.status}): ${e.message}`;
-              throw e;
-            }
-            if (retryable(e.status)) { status.online = false; status.error = e.message === "timeout" ? "الاتصال بطيء — بنعيد المحاولة" : ""; throw e; }
-            status.error = `خطأ (${e.status}): ${e.message}`;   // مرفوض نهائياً
+              if (error && !hasSession()) { checkSession(); throw e; }
+              try { await runOps(type, batch); e = null; } catch (e2) { e = e2; }
+              if (e && e.status === 401) { status.error = `رفض السيرفر (401): ${e.message}`; throw e; }
+              // 403 بعد تجديد الجلسة = ما عنده صلاحية لهالعملية: نتجاوزها عشان ما توقف الباقي
+              if (e) status.error = `عملية مرفوضة وتم تجاوزها (${e.status}): ${e.message}`;
+            } else if (retryable(e.status)) { status.online = false; status.error = e.message === "timeout" ? "الاتصال بطيء — بنعيد المحاولة" : ""; throw e; }
+            else status.error = `عملية مرفوضة وتم تجاوزها (${e.status}): ${e.message}`;   // مرفوض نهائياً
           }
           const done = new Set(batch);
           outbox = outbox.filter((o) => !done.has(o));
@@ -232,7 +234,8 @@ window.DB = (() => {
     if (!on || !profile || status.syncing) return;
     status.syncing = true; emit();
     try {
-      await flush();
+      // الرفع لو تعطّل ما يوقف السحب — الموظف لازم يستلم الجرد الجديد حتى لو عنده شيء معلّق
+      try { await flush(); } catch (e) { if (!hasSession()) throw e; }
       const ch = await pull();
       if (ch) apply(ch);
     } catch (e) {
@@ -245,6 +248,8 @@ window.DB = (() => {
   addEventListener("offline", () => { status.online = false; emit(); });
 
   function resetLocalSync() { ls.del(K.cursor); }
+  // أرقام الجولات اللي لسا ما انرفعت (عشان المدير يعرف)
+  const pendingRounds = () => new Set(outbox.filter((o) => o.t === "round").map((o) => o.row.id));
 
   /* ---------- المدير ---------- */
   async function listProfiles() {
@@ -333,7 +338,7 @@ window.DB = (() => {
     expire() { profile = null; ls.del(K.profile); },   // الجلسة راحت: نرجع لشاشة الدخول ونخلي الطابور
     restore, signIn, signOut, refreshProfile,
     loadItems, get itemsVersion() { return itemsVersion; },
-    queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync,
+    queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync, pendingRounds,
     listProfiles, createUser, updateProfile, setPassword, deleteUser,
     replaceAll, upsertItems, searchCatalog, catalogSize, resetCounts, roundEntries,
   };

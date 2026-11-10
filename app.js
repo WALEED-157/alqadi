@@ -157,7 +157,7 @@
   const pushRound = (r) => window.DB.queue({ t: "round", row: {
     id: r.id, branch: r.branch, loc_from: r.loc_from || "", loc_to: r.loc_to || "", name: r.name || "", users: r.users || [],
     status: r.status, created_at: r.created_at, review_at: r.review_at || null, closed_at: r.closed_at || null,
-    summary: r.summary || null, deleted: !!r.deleted } });
+    summary: r.summary || null, deleted: !!r.deleted, kind: r.kind || "range", items: r.items || [] } });
   // أول جرد لصنف زائد = نرفعه للسيرفر عشان يطلع للكل
   function commitExtra(it) {
     if (!it.x) return;
@@ -211,11 +211,16 @@
   }
   /* ---------- جولات الجرد ---------- */
   // جولة = فرع + نطاق مواقع. الموظف يشوف أصناف النطاق بس، والبحث يشمل الفرع كامل
-  const roundTest = (r) => makeLocTest({ from: r.loc_from || "", to: r.loc_to || "" });
-  const rangeText = (r) => (r.loc_from || r.loc_to ? `${r.loc_from || "…"}${r.loc_to ? " → " + r.loc_to : "…"}` : "الفرع كامل");
+  // الجرد السريع (kind = quick): أصناف يختارها المدير بالاسم/الرقم — ما له نطاق مواقع
+  const isQuick = (r) => r?.kind === "quick";
+  const quickSets = new WeakMap();
+  const quickSet = (r) => { let s = quickSets.get(r); if (!s) { s = new Set(r.items || []); quickSets.set(r, s); } return s; };
+  const roundTest = (r) => (isQuick(r) ? null : makeLocTest({ from: r.loc_from || "", to: r.loc_to || "" }));
+  const rangeText = (r) => (isQuick(r) ? `جرد سريع · ${fmt((r.items || []).length)} صنف`
+    : r.loc_from || r.loc_to ? `${r.loc_from || "…"}${r.loc_to ? " → " + r.loc_to : "…"}` : "الفرع كامل");
   const roundTitle = (r) => r.name || `${branchLabel(r.branch)} · ${rangeText(r)}`;
   const STATUS_AR = { open: "جاري الجرد", review: "مراجعة الفروقات", closed: "مغلق" };
-  function inRange(r, it, t = roundTest(r)) { return !t || t(it.loc || ""); }
+  function inRange(r, it, t = roundTest(r)) { return isQuick(r) ? quickSet(r).has(it.n) : !t || t(it.loc || ""); }
   // أصناف الجولة: اللي موقعها بالنظام داخل النطاق + اللي انجردت فيها (من موقع ثاني) + الزائدة
   function roundItemsOf(r) {
     if (!state.data) return [];
@@ -274,7 +279,7 @@
       }
       if (state.data) $("#toast").hidden = true;
     }
-    if (h === "branches") { renderRounds(); return show("branches"); }
+    if (h === "branches") { renderRounds(); runSync(); return show("branches"); }   // نسحب آخر جرد فتحه المدير
     if (h === "admin" && u.role === "admin") { renderAdmin(); return show("admin"); }
     const m = h.match(/^inv\/([\w-]+)$/);
     const r = m && state.rounds[m[1]];
@@ -1191,6 +1196,12 @@
   // الضغط على النقطة: يعرض الحالة بالتفصيل ويعيد المحاولة
   $$(".sync-ind").forEach((el) => el.addEventListener("click", () => { toast(syncTxt, 4000); runSync(); }));
   window.DB.onStatus(renderSync);
+  // المدير: لما تنرفع جولة نشيل علامة "لسا ما انرفع"
+  let lastPendRounds = 0;
+  window.DB.onStatus(() => {
+    const n = window.DB.pendingRounds().size;
+    if (n !== lastPendRounds) { lastPendRounds = n; if (state.screen === "admin" && adminTab === "rounds") renderAdmin(true); }
+  });
   renderSync(window.DB.getStatus());
 
   /* ---------- تصدير ---------- */
@@ -1274,6 +1285,7 @@
     const all = Object.values(state.rounds).filter((r) => !r.deleted);
     const active = all.filter((r) => r.status !== "closed").sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
     const closed = all.filter((r) => r.status === "closed").sort((a, b) => (a.closed_at < b.closed_at ? 1 : -1)).slice(0, 30);
+    const pend = window.DB.pendingRounds?.() || new Set();
     const card = (r) => {
       const p = roundProgress(r);
       const who = [...roundCounters(r).keys()];
@@ -1284,7 +1296,8 @@
         ? `<button data-act="close" class="btn primary sm-btn">إغلاق واعتماد</button><button data-act="reopen" class="btn ghost sm-btn">رجوع للجرد</button><button data-act="report" class="btn ghost sm-btn">التقرير</button>`
         : `<button data-act="erp" class="btn primary sm-btn">ملف النظام (Excel)</button><button data-act="excel" class="btn ghost sm-btn">التفاصيل</button><button data-act="report" class="btn ghost sm-btn">التقرير</button>`;
       return `<div class="stat-card round-admin st-${st}" data-id="${esc(r.id)}">
-        <div class="sc-top"><strong>${esc(r.name || branchLabel(r.branch))}</strong><i class="badge ${st === "review" ? "b2" : st === "closed" ? "b3" : ""}">${STATUS_AR[st]}</i></div>
+        <div class="sc-top"><strong>${isQuick(r) ? "⚡ " : ""}${esc(r.name || branchLabel(r.branch))}</strong><i class="badge ${st === "review" ? "b2" : st === "closed" ? "b3" : ""}">${STATUS_AR[st]}</i></div>
+        ${pend.has(r.id) ? `<small class="w">⏳ لسا ما انرفع للسيرفر — الموظفين ما يشوفونه. اضغط النقطة فوق للتفاصيل</small>` : ""}
         <small class="muted">${esc(branchLabel(r.branch))} · <b dir="ltr">${esc(rangeText(r))}</b> · فُتح ${fmtDate(r.created_at)}${r.closed_at ? " · أُغلق " + fmtDate(r.closed_at) : ""}</small>
         <span class="bc-bar"><span style="width:${p.pct}%"></span></span>
         <div class="sc-nums">
@@ -1299,25 +1312,28 @@
       </div>`;
     };
     $("#tab-rounds").innerHTML =
-      `<button class="btn primary block" id="new-round"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> فتح جرد جديد (موقع / نطاق مواقع)</button>` +
+      `<div class="ra-new"><button class="btn primary" id="new-round"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> جرد مواقع (نطاق)</button>` +
+      `<button class="btn ghost" id="new-quick"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg> جرد سريع (اختيار أصناف)</button></div>` +
       `<h4 class="sec">الجاري</h4>` + (active.map(card).join("") || `<p class="muted pad">ما فيه جرد مفتوح</p>`) +
       (closed.length ? `<h4 class="sec">المغلق</h4>` + closed.map(card).join("") : "");
   }
   $("#tab-rounds").addEventListener("click", (e) => {
     if (e.target.closest("#new-round")) return openRoundForm(null);
+    if (e.target.closest("#new-quick")) return openQuick(null);
     const b = e.target.closest("[data-act]"); if (!b) return;
     const r = state.rounds[b.closest("[data-id]").dataset.id]; if (!r) return;
     roundAction(r, b.dataset.act);
   });
   function updateRound(r, fields) {
     Object.assign(r, fields);
+    quickSets.delete(r);
     saveRounds();
     pushRound(r);
     renderAdmin();
   }
   async function roundAction(r, act) {
     if (act === "report") return openReport(r);
-    if (act === "edit") return openRoundForm(r);
+    if (act === "edit") return isQuick(r) ? openQuick(r) : openRoundForm(r);
     if (act === "erp") return exportERP(r);
     if (act === "excel") return exportRoundsExcel([r], `جرد-${roundTitle(r)}-${today()}.xlsx`);
     if (act === "del") {
@@ -1385,7 +1401,7 @@
     const r = { id: editingRound?.id || "_", branch: bname, loc_from: cleanLoc($("#rd-from").value), loc_to: cleanLoc($("#rd-to").value) };
     const t = roundTest(r);
     const its = branchItemsOf(bname).filter((it) => !t || t(it.loc || ""));
-    const overlap = Object.values(state.rounds).filter((o) => !o.deleted && o.status !== "closed" && o.branch === bname && o.id !== r.id)
+    const overlap = Object.values(state.rounds).filter((o) => !o.deleted && !isQuick(o) && o.status !== "closed" && o.branch === bname && o.id !== r.id)
       .filter((o) => its.some((it) => inRange(o, it))).map(roundTitle);
     $("#rd-preview").innerHTML = `<b>${fmt(its.length)}</b> صنف ${t ? `في النطاق <b dir="ltr">${esc(rangeText(r))}</b>` : "(الفرع كامل)"}` +
       (overlap.length ? `<br><span class="w">⚠️ يتداخل مع جرد مفتوح: ${overlap.map(esc).join("، ")}</span>` : "");
@@ -1408,6 +1424,146 @@
     state.rounds[r.id] = r;
     updateRound(r, {});
     toast("✓ تم فتح الجرد — يطلع للموظفين الحين", 3000);
+  });
+
+  // ---- جرد سريع: شاشة اختيار الأصناف بفلاتر مثل Excel ----
+  const QK_FIELDS = { n: "رقم الصنف", name: "اسم الصنف", loc: "الموقع", q: "المتوفر" };
+  const QK_OPS_TXT = { starts: "يبدأ بـ", contains: "يحتوي", eq: "يساوي", notcontains: "لا يحتوي", notstarts: "لا يبدأ بـ" };
+  const QK_OPS_NUM = { gt: "أكبر من", lt: "أقل من", eq: "يساوي" };
+  const qk = { branch: null, sel: new Set(), filters: [], round: null, list: [] };
+  function openQuick(r) {
+    const bs = state.data.branches;
+    if (!bs.length) { toast("ارفع المخزون أول من تبويب البيانات"); return; }
+    qk.round = r;
+    qk.branch = r ? r.branch : state.lastRoundBranch || bs[0];
+    qk.sel = new Set(r?.items || []);
+    qk.filters = [{ f: "name", op: "contains", v: "" }];
+    $("#qk-title").textContent = r ? "تعديل الجرد السريع" : "جرد سريع — اختيار الأصناف";
+    $("#qk-branch").innerHTML = bs.map((b) => `<option value="${esc(b)}"${b === qk.branch ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("");
+    $("#qk-branch").disabled = !!r;
+    $("#qk-name").value = r?.name || "";
+    $("#qk-only").checked = !!r;
+    $("#qk-paste").value = "";
+    const users = allUsers().filter((u) => u.role !== "admin" && u.active !== false);
+    const usel = new Set(r?.users || []);
+    $("#qk-users").innerHTML = users.length ? users.map((u) => {
+      const id = CLOUD ? u.id : u.username;
+      return `<label class="uchk"><input type="checkbox" value="${esc(id)}"${usel.has(id) ? " checked" : ""}><span>${esc(u.name)}</span></label>`;
+    }).join("") : `<p class="muted">ما فيه موظفين — أضفهم من تبويب المستخدمون</p>`;
+    renderQkFilters();
+    applyQk();
+    openOverlay("quick-backdrop");
+    if (CLOUD && !state.profiles) loadProfiles().then(() => { if (!$("#quick-backdrop").hidden && qk.round === r) { const keep = new Set(qk.sel); openQuick(r); qk.sel = keep; applyQk(); } });
+    setTimeout(() => $("#qk-filters .qf-v")?.focus(), 250);
+  }
+  function renderQkFilters() {
+    $("#qk-filters").innerHTML = qk.filters.map((f, i) => {
+      const ops = f.f === "q" ? QK_OPS_NUM : QK_OPS_TXT;
+      return `<div class="qf-row" data-i="${i}">
+        <select class="qf-f">${Object.entries(QK_FIELDS).map(([k, t]) => `<option value="${k}"${k === f.f ? " selected" : ""}>${t}</option>`).join("")}</select>
+        <select class="qf-op">${Object.entries(ops).map(([k, t]) => `<option value="${k}"${k === f.op ? " selected" : ""}>${t}</option>`).join("")}</select>
+        <input class="qf-v" value="${esc(f.v)}" placeholder="${f.f === "q" ? "0" : "مثال: بواجي ، فلتر"}" autocomplete="off"${f.f === "n" || f.f === "loc" || f.f === "q" ? ' dir="ltr"' : ""}>
+        <button type="button" class="sr-del" aria-label="حذف"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>`;
+    }).join("");
+  }
+  // قيم الشرط: "بواجي ، فلتر" أو "بواجي أو فلتر" = أي وحدة منها
+  const qkValues = (v) => String(v || "").split(/\s*(?:[,،|]|\sأو\s)\s*/).map((s) => s.trim()).filter(Boolean);
+  function qkTest(f) {
+    const vals = qkValues(f.v);
+    if (!vals.length) return null;
+    if (f.f === "q") {
+      const x = +toEnDigits(vals[0]);
+      if (!Number.isFinite(x)) return null;
+      return (it) => (f.op === "gt" ? it.q > x : f.op === "lt" ? it.q < x : it.q === x);
+    }
+    const neg = f.op === "notcontains" || f.op === "notstarts";
+    const mode = f.op === "starts" || f.op === "notstarts" ? "starts" : f.op === "eq" ? "eq" : "contains";
+    const prep = vals.map((v) => ({ t: norm(v), k: numKey(v) }));
+    const hay = (it) => (f.f === "n" ? [it.nn, it.nk] : f.f === "name" ? [it.nm] : [norm(it.loc || "")]);
+    const hit = (h, p) => (mode === "starts" ? h.startsWith(p) : mode === "eq" ? h === p : h.includes(p));
+    const one = (it) => { const hs = hay(it); return prep.some((p) => hs.some((h, j) => hit(h, j === 1 ? p.k : p.t) && (j === 0 || p.k))); };
+    return neg ? (it) => !one(it) : one;
+  }
+  function applyQk() {
+    const tests = qk.filters.map(qkTest).filter(Boolean);
+    const all = branchItemsOf(qk.branch);
+    const only = $("#qk-only").checked;
+    qk.list = all.filter((it) => (only ? qk.sel.has(it.n) : true) && tests.every((t) => t(it)));
+    const shown = qk.list.slice(0, 300);
+    const selIn = qk.list.filter((it) => qk.sel.has(it.n)).length;
+    $("#qk-count").innerHTML = `النتائج <b>${fmt(qk.list.length)}</b>${!tests.length && !only ? " (كل الفرع)" : ""} · المحدد منها <b>${fmt(selIn)}</b> · <span class="okc">إجمالي المحدد <b>${fmt(qk.sel.size)}</b></span>`;
+    $("#qk-list").innerHTML = shown.length ? `<table class="rp-table qk-table"><thead><tr><th></th><th>رقم الصنف</th><th>اسم الصنف</th><th>الموقع</th><th>المتوفر</th></tr></thead><tbody>` +
+      shown.map((it) => `<tr data-n="${esc(it.n)}" class="${qk.sel.has(it.n) ? "on" : ""}"><td><input type="checkbox"${qk.sel.has(it.n) ? " checked" : ""}></td>
+        <td dir="ltr">${esc(it.n)}</td><td>${esc(it.name)}</td><td dir="ltr">${esc(it.loc || "—")}</td><td>${fmt(it.q)}</td></tr>`).join("") +
+      `</tbody></table>${qk.list.length > shown.length ? `<p class="hint pad">يعرض أول 300 — "تحديد كل النتائج" يحدد الـ ${fmt(qk.list.length)} كلها</p>` : ""}`
+      : `<p class="muted pad">ما فيه نتائج</p>`;
+    $("#qk-save").textContent = qk.round ? `حفظ التعديل (${fmt(qk.sel.size)} صنف)` : `إنشاء الجرد السريع (${fmt(qk.sel.size)} صنف)`;
+  }
+  let qkT;
+  $("#qk-filters").addEventListener("input", (e) => {
+    const row = e.target.closest(".qf-row"); if (!row) return;
+    const f = qk.filters[+row.dataset.i];
+    if (e.target.classList.contains("qf-v")) { f.v = e.target.value; clearTimeout(qkT); qkT = setTimeout(applyQk, 200); }
+  });
+  $("#qk-filters").addEventListener("change", (e) => {
+    const row = e.target.closest(".qf-row"); if (!row) return;
+    const f = qk.filters[+row.dataset.i];
+    if (e.target.classList.contains("qf-f")) { f.f = e.target.value; f.op = f.f === "q" ? "gt" : "contains"; renderQkFilters(); }
+    if (e.target.classList.contains("qf-op")) f.op = e.target.value;
+    applyQk();
+  });
+  $("#qk-filters").addEventListener("click", (e) => {
+    const d = e.target.closest(".sr-del"); if (!d) return;
+    qk.filters.splice(+d.closest(".qf-row").dataset.i, 1);
+    if (!qk.filters.length) qk.filters.push({ f: "name", op: "contains", v: "" });
+    renderQkFilters(); applyQk();
+  });
+  $("#qk-add-filter").addEventListener("click", () => {
+    qk.filters.push({ f: "n", op: "starts", v: "" });
+    renderQkFilters();
+    $$("#qk-filters .qf-v").at(-1)?.focus();
+  });
+  $("#qk-branch").addEventListener("change", () => { qk.branch = $("#qk-branch").value; state.lastRoundBranch = qk.branch; qk.sel.clear(); applyQk(); });
+  $("#qk-only").addEventListener("change", applyQk);
+  $("#qk-all").addEventListener("click", () => {
+    if (qk.list.length > 3000 && !confirm(`تحديد ${fmt(qk.list.length)} صنف؟`)) return;
+    qk.list.forEach((it) => qk.sel.add(it.n)); applyQk();
+  });
+  $("#qk-none").addEventListener("click", () => { qk.list.forEach((it) => qk.sel.delete(it.n)); applyQk(); });
+  $("#qk-list").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-n]"); if (!tr) return;
+    const n = tr.dataset.n;
+    if (qk.sel.has(n)) qk.sel.delete(n); else qk.sel.add(n);
+    const on = qk.sel.has(n);
+    tr.classList.toggle("on", on); tr.querySelector("input").checked = on;
+    const selIn = qk.list.filter((it) => qk.sel.has(it.n)).length;
+    $("#qk-count").innerHTML = $("#qk-count").innerHTML.replace(/المحدد منها <b>[^<]*<\/b>/, `المحدد منها <b>${fmt(selIn)}</b>`).replace(/إجمالي المحدد <b>[^<]*<\/b>/, `إجمالي المحدد <b>${fmt(qk.sel.size)}</b>`);
+    $("#qk-save").textContent = qk.round ? `حفظ التعديل (${fmt(qk.sel.size)} صنف)` : `إنشاء الجرد السريع (${fmt(qk.sel.size)} صنف)`;
+  });
+  $("#qk-paste-add").addEventListener("click", () => {
+    const have = new Map(branchItemsOf(qk.branch).map((it) => [it.n.toUpperCase(), it.n]));
+    let add = 0, miss = [];
+    for (const line of $("#qk-paste").value.split(/\r?\n/)) {
+      const v = toEnDigits(line.split("\t")[0]).trim().toUpperCase().replace(/\s+/g, " ");
+      if (!v || /رقم/.test(v)) continue;
+      const n = have.get(v);
+      if (n) { if (!qk.sel.has(n)) add++; qk.sel.add(n); } else miss.push(v);
+    }
+    $("#qk-paste").value = miss.join("\n");
+    toast(`✓ أُضيف ${fmt(add)} صنف${miss.length ? ` · ${fmt(miss.length)} مو موجود بمخزون الفرع (باقي في المربع)` : ""}`, 3500);
+    $("#qk-only").checked = true; applyQk();
+  });
+  $("#qk-save").addEventListener("click", () => {
+    if (!qk.sel.size) { toast("حدد أصناف أول"); return; }
+    const users = $$("#qk-users input:checked").map((i) => i.value);
+    const fields = { name: $("#qk-name").value.trim(), users, items: [...qk.sel], kind: "quick", loc_from: "", loc_to: "" };
+    closeOverlay("quick-backdrop");
+    if (qk.round) { updateRound(qk.round, fields); toast("✓ تم تعديل الجرد السريع"); return; }
+    const r = { id: window.DB.uuid(), branch: qk.branch, status: "open", created_at: new Date().toISOString(), deleted: false, ...fields };
+    state.rounds[r.id] = r;
+    updateRound(r, {});
+    toast(`✓ جرد سريع (${fmt(fields.items.length)} صنف) — يطلع للموظفين الحين`, 3000);
   });
 
   // ---- تقرير نهاية الجرد ----
@@ -1565,7 +1721,7 @@
       const last = Object.values(state.rounds).filter((r) => !r.deleted).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
       locsBranch = last && bs.includes(last.branch) ? last.branch : bs[0];
     }
-    const rounds = Object.values(state.rounds).filter((r) => !r.deleted && r.branch === locsBranch);
+    const rounds = Object.values(state.rounds).filter((r) => !r.deleted && !isQuick(r) && r.branch === locsBranch);   // الجرد السريع ما يدخل بالخريطة
     const tests = rounds.map((r) => ({ r, t: roundTest(r) }));
     const bins = new Map();
     let noLoc = 0;
@@ -2032,7 +2188,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "10";
+  const APP_VER = "11";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
 
   /* ---------- الوضع النهاري / الليلي ---------- */
