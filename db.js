@@ -225,6 +225,9 @@ window.DB = (() => {
       // نفس الصنف مرتين بنفس الدفعة = نرسل الأخير بس
       const m = new Map(ops.map((o) => [`${o.row.round_id}|${o.row.n}`, o.row]));
       await q(sb.from(TABLE[type]).upsert([...m.values()], { onConflict: "round_id,n" }));
+    } else if (type === "bin") {
+      const m = new Map(ops.map((o) => [`${o.row.round_id}|${o.row.bin}`, o.row]));
+      await q(sb.from("bin_status").upsert([...m.values()], { onConflict: "round_id,bin" }));
     } else if (type === "barcode") {
       const m = new Map(ops.map((o) => [o.row.code, o.row]));
       await q(sb.from("barcodes").upsert([...m.values()], { onConflict: "code" }));

@@ -145,7 +145,7 @@
   const iso = (t) => new Date(t || Date.now()).toISOString();
   const rid = () => state.round?.id;
   function pushEntry(it, e) {
-    window.DB.queue({ t: "entry", row: { id: e.id, round_id: rid(), branch: bOf(it), n: it.n, qty: e.qty, user_id: e.u, by_name: e.by || "", at: iso(e.at), kind: e.kind || "count" } });
+    window.DB.queue({ t: "entry", row: { id: e.id, round_id: rid(), branch: bOf(it), n: it.n, qty: e.qty, user_id: e.u, by_name: e.by || "", at: iso(e.at), kind: e.kind || "count", bin: e.bin || null } });
   }
   const pushDel = (id) => window.DB.queue({ t: "del", id });
   const pushMeta = (it, c) => window.DB.queue({ t: "meta", row: {
@@ -284,10 +284,23 @@
     }
     if (h === "branches") { renderRounds(); runSync(); return show("branches"); }   // نسحب آخر جرد فتحه المدير
     if (h === "admin" && u.role === "admin") { renderAdmin(); return show("admin"); }
+    // جرد الباركود: قائمة المواقع / داخل موقع
+    const mb = h.match(/^bins\/([\w-]+)$/) || h.match(/^bin\/([\w-]+)\/(.+)$/);
+    if (mb) {
+      const rb = state.rounds[mb[1]];
+      if (!rb || !myRounds().includes(rb) || !state.data.branches.includes(rb.branch)) return go("branches");
+      if (rb.status !== "open") return go("inv/" + rb.id);           // المراجعة بالشاشة العادية
+      enterRound(rb);
+      if (mb[2]) { state.binCur = decodeURIComponent(mb[2]); renderBin(); return show("bin"); }
+      renderBins(); return show("bins");
+    }
     const m = h.match(/^inv\/([\w-]+)$/);
     const r = m && state.rounds[m[1]];
     if (r && myRounds().includes(r) && state.data.branches.includes(r.branch)) {
-      openRound(r); return show("inventory");
+      if (r.status === "open" && modes[r.id] === "scan") return go("bins/" + r.id);
+      openRound(r); show("inventory");
+      if (r.status === "open" && !modes[r.id]) openOverlay("mode-backdrop");   // أول مرة: عادي ولا باركود؟
+      return;
     }
     go(m ? "branches" : "home");
   }
@@ -309,7 +322,7 @@
     if (rec) { rec.stop(); return; }
     const open = $$(".sheet-backdrop:not([hidden])");
     if (open.length) { closeOverlay(open[open.length - 1].id); return; }
-    const up = { inventory: "branches", branches: "home", admin: "home" }[state.screen];
+    const up = { inventory: "branches", branches: "home", admin: "home", bins: "branches", bin: state.round ? "bins/" + state.round.id : "branches" }[state.screen];
     if (up) go(up);
   }
 
@@ -476,6 +489,7 @@
     $("#inv-branch").textContent = r.name || branchLabel(r.branch);
     $("#inv-tb-label").textContent = review ? "مراجعة الفروقات" : rangeText(r);
     document.body.classList.toggle("review", review);
+    $("#to-scan").hidden = review;
     renderPins();
     applyFilter();
   }
@@ -795,16 +809,23 @@
     for (let L = Math.min(code.length, 14); L >= 5; L--) { const k = code.slice(0, L); if (m.has(k)) return { code, part, items: m.get(k), how: "prefix" }; }
     return { code, part, items: [], how: "none" };
   }
-  function beep() {
+  // صوت: ok = صنف هذا الموقع، warn = صنف من موقع ثاني، err = باركود غير معروف
+  function beep(kind = "ok") {
     try {
       const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
-      const ac = beep.ac ||= new A(); const o = ac.createOscillator(), g = ac.createGain();
-      o.frequency.value = 1500; g.gain.value = .12; o.connect(g); g.connect(ac.destination);
-      o.start(); o.stop(ac.currentTime + .09);
+      const ac = beep.ac ||= new A();
+      const tones = { ok: [[1500, 0, .09]], warn: [[900, 0, .08], [900, .13, .08]], err: [[320, 0, .35]] }[kind];
+      for (const [f, at, len] of tones) {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.frequency.value = f; g.gain.value = .14; o.connect(g); g.connect(ac.destination);
+        o.start(ac.currentTime + at); o.stop(ac.currentTime + at + len);
+      }
     } catch {}
+    if (kind !== "ok") navigator.vibrate?.(kind === "err" ? [80, 60, 80] : 60);
     navigator.vibrate?.(40);
   }
   function handleScan(raw) {
+    if (state.screen === "bin") return binScan(raw);
     if (state.screen !== "inventory" || !state.round) return;
     const res = resolveBarcode(raw);
     if (!res.code) return;
@@ -863,6 +884,13 @@
       if (!cam || cam.stop || !text) return;
       const now = Date.now();
       if (text !== cam.last || now - cam.lastAt > 1500) { cam.last = text; cam.lastAt = now; return; }
+      if (state.screen === "bin" && !binQtyMode) {
+        if (now < (cam.pause || 0)) return;
+        cam.pause = now + 1300; cam.last = "";          // نفس الكرتون قدام الكاميرا ما ينحسب مرتين بسرعة
+        const it = binScan(text);
+        $("#scan-hint").textContent = it ? `✓ ${it.n} — ${binDraft().q[it.n] || 0} حبة` : "باركود غير معروف";
+        return;
+      }
       closeOverlay("scan-ov");
       handleScan(text);
     };
@@ -922,7 +950,7 @@
   // ---- سكانر خارجي (يكتب مثل الكيبورد بسرعة ويضغط Enter) ----
   const kbScan = { buf: "", t0: 0, last: 0 };
   document.addEventListener("keydown", (e) => {
-    if (state.screen !== "inventory" || $$(".sheet-backdrop:not([hidden])").length) return;
+    if ((state.screen !== "inventory" && state.screen !== "bin") || $$(".sheet-backdrop:not([hidden])").length) return;
     const now = performance.now();
     if (e.key === "Enter") {
       const n = kbScan.buf.length;
@@ -938,6 +966,334 @@
     if (now - kbScan.last > 100) { kbScan.buf = ""; kbScan.t0 = now; }
     kbScan.buf += e.key; kbScan.last = now;
   }, true);
+
+  /* ===== جرد الباركود: موقع موقع =====
+     - الموظف يفتح الرف (A001)، كل ضربة = حبة، وزر الكمية للكراتين
+     - كل شي "مسودة" لين يقفل الرف (يعدّل بحرية، ومحفوظة لو انقفل التطبيق)
+     - القفل = إدخال واحد لكل صنف مربوط بالرف، وينتقل للرف اللي بعده
+     - الصنف يقدر يكون بأكثر من رف: المجموع للصنف، والموقع يبقى الأصلي، والرفوف الثانية بالملاحظات
+     - يمشي مع الجرد العادي بنفس الجولة بدون تعارض */
+  const LS_MODES = "inv_modes_v1";
+  const modes = store.get(LS_MODES, {});
+  const LS_BINST = CLOUD ? "inv_binst_cloud_v1" : "inv_binst_v1";
+  state.binSt = store.get(LS_BINST, {});                 // "جولة|رف" → {status, u, by, at}
+  const LS_DRAFTS = "inv_bin_drafts_v1";
+  const drafts = store.get(LS_DRAFTS, {});              // "جولة|رف" → {q:{رقم: كمية}, order:[], hist:[], last}
+  const saveDrafts = () => store.set(LS_DRAFTS, drafts);
+  let binQtyMode = store.get("inv_qtymode", false);
+  const binOf = (loc) => { const L = cleanLoc(loc); return L.match(/^[A-Z]+[-+]?\d+/)?.[0] || L.match(/^[A-Z]+$/)?.[0] || ""; };
+  const binCmp = (a, b) => {
+    const pa = parseLoc(a) || { p: a, n: -1 }, pb = parseLoc(b) || { p: b, n: -1 };
+    return (pa.p < pb.p ? -1 : pa.p > pb.p ? 1 : 0) || pa.n - pb.n || (a < b ? -1 : a > b ? 1 : 0);
+  };
+  const binKey = (bin) => `${state.round.id}|${bin}`;
+  const binDraft = () => (drafts[binKey(state.binCur)] ||= { q: {}, order: [], hist: [], last: null });
+  // نفس إعداد الجولة بدون شاشة القائمة
+  function enterRound(r) {
+    if (state.round?.id !== r.id) { state.status = "todo"; state.pins = []; }
+    state.round = r; state.mode = "open";
+    state.branch = state.data.branches.indexOf(r.branch);
+    setRoundItems();
+  }
+  // رفوف الجولة: من مواقع أصنافها بالنظام + أي رف انجرد فيه
+  function roundBins(r) {
+    const m = new Map();
+    for (const it of roundItemsOf(r)) {
+      if (it.x || !inRange(r, it)) continue;
+      const b = binOf(it.loc); if (!b) continue;
+      m.set(b, (m.get(b) || 0) + 1);
+    }
+    for (const [k, c] of Object.entries(state.counts)) if (k.startsWith(r.id + "|")) for (const e of c.entries) if (e.bin && !m.has(e.bin)) m.set(e.bin, 0);
+    for (const k of Object.keys(drafts)) if (k.startsWith(r.id + "|")) { const b = k.slice(r.id.length + 1); if (!m.has(b)) m.set(b, 0); }
+    return [...m.entries()].map(([bin, n]) => ({ bin, n })).sort((a, b) => binCmp(a.bin, b.bin));
+  }
+  // الكمية المعتمدة لكل صنف في رف (من الإدخالات)
+  function binCommitted(r, bin) {
+    const m = new Map(), pre = r.id + "|";
+    for (const [k, c] of Object.entries(state.counts)) {
+      if (!k.startsWith(pre)) continue;
+      for (const e of c.entries) if (e.bin === bin) m.set(k.slice(pre.length), (m.get(k.slice(pre.length)) || 0) + (+e.qty || 0));
+    }
+    return m;
+  }
+  // الرفوف الثانية للصنف (للملاحظات بالتصدير)
+  function extraBinsNote(it, c) {
+    if (!c) return "";
+    const m = new Map();
+    for (const e of c.entries) if (e.bin) m.set(e.bin, (m.get(e.bin) || 0) + (+e.qty || 0));
+    const orig = binOf(it.loc);
+    const others = [...m.entries()].filter(([b, q]) => q && b !== orig && b !== c.loc);
+    return others.length ? `مواقع إضافية: ${others.map(([b, q]) => `${b} (${q})`).join("، ")}` : "";
+  }
+  const binStatus = (bin) => {
+    const s = state.binSt[binKey(bin)];
+    const fresh = s && Date.now() - (s.at || 0) < 3 * 3600000;      // الفتح يعتبر منتهي بعد 3 ساعات (جوال طفى مثلاً)
+    if (s?.status === "closed") return { st: "closed", by: s.by, at: s.at };
+    if (drafts[binKey(bin)] && Object.keys(drafts[binKey(bin)].q).length) return { st: "draft" };
+    if (s?.status === "open" && fresh && s.u !== myId()) return { st: "busy", by: s.by };
+    return { st: "" };
+  };
+  function pushBin(bin, status) {
+    const row = { round_id: state.round.id, bin, status, by_name: me()?.name || "" };
+    state.binSt[binKey(bin)] = { status, u: myId(), by: row.by_name, at: Date.now() };
+    store.set(LS_BINST, state.binSt);
+    window.DB.queue({ t: "bin", row });
+  }
+
+  // ---- قائمة المواقع ----
+  function renderBins() {
+    const r = state.round;
+    const bins = roundBins(r);
+    let closed = 0;
+    $("#bins-title").textContent = r.name || branchLabel(r.branch);
+    $("#bins-list").innerHTML = bins.length ? bins.map(({ bin, n }) => {
+      const s = binStatus(bin);
+      if (s.st === "closed") closed++;
+      const lab = { closed: `✓ انقفل${s.by ? " · " + esc(s.by) : ""}`, draft: "✎ مسودة — ما انقفل", busy: `مفتوح عند ${esc(s.by || "موظف")}`, "": "" }[s.st];
+      return `<button class="bin-row st-${s.st || "left"}" data-bin="${esc(bin)}"><b dir="ltr">${esc(bin)}</b><span>${n ? fmt(n) + " صنف بالنظام" : "بدون أصناف بالنظام"}</span><i>${lab}</i></button>`;
+    }).join("") : `<p class="muted pad">ما فيه مواقع بنطاق هذا الجرد — استخدم "اكتب موقع"</p>`;
+    $("#bins-count").textContent = `${fmt(closed)}/${fmt(bins.length)}`;
+    $("#bins-bar").style.width = bins.length ? (closed / bins.length) * 100 + "%" : "0";
+    const nxt = bins.find((b) => binStatus(b.bin).st !== "closed" && binStatus(b.bin).st !== "busy");
+    $("#bins-next").textContent = nxt ? `ابدأ من ${nxt.bin} ←` : "كل المواقع انقفلت ✓";
+    $("#bins-next").disabled = !nxt;
+  }
+  function openBin(bin) {
+    bin = cleanLoc(bin);
+    if (!bin) return;
+    const s = binStatus(bin);
+    if (s.st === "busy" && !confirm(`الموقع ${bin} مفتوح عند ${s.by || "موظف ثاني"}.\nتفتحه أنت بعد؟ (ممكن ينجرد مرتين)`)) return;
+    const key = binKey(bin);
+    // رف مقفول قبل: نفتحه للتعديل من الكميات المعتمدة
+    if (!drafts[key]) {
+      const had = binCommitted(state.round, bin);
+      drafts[key] = { q: Object.fromEntries(had), order: [...had.keys()], hist: [], last: null };
+      saveDrafts();
+    }
+    if (state.binSt[key]?.status !== "open" || state.binSt[key]?.u !== myId()) pushBin(bin, "open");
+    go(`bin/${state.round.id}/${encodeURIComponent(bin)}`);
+  }
+  $("#bins-list").addEventListener("click", (e) => { const b = e.target.closest("[data-bin]"); if (b) openBin(b.dataset.bin); });
+  $("#bins-next").addEventListener("click", () => {
+    const nxt = roundBins(state.round).find((b) => !["closed", "busy"].includes(binStatus(b.bin).st));
+    if (nxt) openBin(nxt.bin);
+  });
+  $("#bins-goto-btn").addEventListener("click", () => { openBin($("#bins-goto").value); $("#bins-goto").value = ""; });
+  $("#bins-goto").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#bins-goto-btn").click(); });
+  $("#to-scan").addEventListener("click", () => { modes[state.round.id] = "scan"; store.set(LS_MODES, modes); go("bins/" + state.round.id); });
+  $("#to-normal").addEventListener("click", () => { modes[state.round.id] = "normal"; store.set(LS_MODES, modes); go("inv/" + state.round.id); });
+  $("#mode-backdrop").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mode]"); if (!b) return;
+    modes[state.round.id] = b.dataset.mode; store.set(LS_MODES, modes);
+    closeOverlay("mode-backdrop");
+    if (b.dataset.mode === "scan") go("bins/" + state.round.id);
+  });
+
+  // ---- داخل الموقع ----
+  const itemByN = (n) => state.branchAll.find((x) => x.n === n);
+  function renderBin() {
+    const r = state.round, bin = state.binCur, d = binDraft();
+    const expected = roundItemsOf(r).filter((it) => !it.x && binOf(it.loc) === bin);
+    $("#bin-title").textContent = bin;
+    $("#bin-sub").textContent = `${fmt(expected.length)} صنف بالنظام`;
+    $("#bin-qtymode").classList.toggle("active", binQtyMode);
+    const scanned = d.order.filter((n) => d.q[n] > 0).reverse();
+    const scannedSet = new Set(scanned);
+    const pieces = scanned.reduce((s, n) => s + d.q[n], 0);
+    $("#bin-total").textContent = `${fmt(scanned.length)} صنف · ${fmt(pieces)} حبة`;
+    const row = (it, q) => {
+      const other = binOf(it.loc) !== bin;
+      return `<div class="bin-item${q ? " on" : ""}${it.n === d.last ? " last" : ""}" data-n="${esc(it.n)}">
+        <span class="bi-t"><b dir="ltr">${esc(it.n)}</b>${it.x ? '<i class="xb">زائد</i>' : other ? `<i class="xb ob">موقعه ${esc(binOf(it.loc) || "بدون")}</i>` : ""}<small>${esc(it.name)}</small></span>
+        <span class="bi-sys">نظام <b>${fmt(it.q)}</b>${resv(it) ? `<i>محجوز ${fmt(resv(it))}</i>` : ""}</span>
+        <span class="bi-q">${q ? fmt(q) : "—"}</span></div>`;
+    };
+    $("#bin-list").innerHTML =
+      scanned.map((n) => { const it = itemByN(n); return it ? row(it, d.q[n]) : ""; }).join("") +
+      (expected.some((it) => !scannedSet.has(it.n)) ? `<div class="bin-sep">بالنظام في ${esc(bin)} — ما انمسحت بعد</div>` : "") +
+      expected.filter((it) => !scannedSet.has(it.n)).map((it) => row(it, 0)).join("");
+    // بطاقة آخر صنف
+    const last = d.last && itemByN(d.last);
+    $("#bl-empty").hidden = !!last; $("#bl-card").hidden = !last;
+    if (last) {
+      $("#bl-num").textContent = last.n; $("#bl-name").textContent = last.name;
+      $("#bl-big").textContent = fmt(d.q[last.n] || 0);
+      const other = !last.x && binOf(last.loc) !== bin;
+      $("#bl-tag").textContent = last.x ? "صنف زائد" : other ? `موقعه بالنظام ${binOf(last.loc) || "— بدون موقع"} · انضاف على مجموعه` : "";
+      $("#bl-tag").className = "bl-tag" + (last.x || other ? " w" : "");
+      const tot = countOf(last)?.qty || 0;
+      $("#bl-sys").textContent = `النظام ${fmt(last.q)}${resv(last) ? ` · محجوز ${fmt(resv(last))}` : ""}${tot ? ` · معتمد بكل المواقع ${fmt(tot)}` : ""}`;
+    }
+  }
+  // إضافة/تعديل كمية صنف في الرف (مسودة)
+  function binSet(it, qty) {
+    const d = binDraft();
+    d.hist.push({ n: it.n, prev: d.q[it.n] || 0 });
+    if (d.hist.length > 200) d.hist.shift();
+    if (qty > 0) { d.q[it.n] = qty; if (!d.order.includes(it.n)) d.order.push(it.n); else { d.order = d.order.filter((x) => x !== it.n); d.order.push(it.n); } }
+    else delete d.q[it.n];
+    d.last = qty > 0 ? it.n : d.last === it.n ? null : d.last;
+    saveDrafts();
+    renderBin();
+  }
+  const binAdd = (it, n = 1) => binSet(it, (binDraft().q[it.n] || 0) + n);
+  // ضربة باركود داخل الرف
+  function binScan(raw) {
+    const res = resolveBarcode(raw);
+    if (!res.code) return null;
+    window.DB.note?.(`رف ${state.binCur}: باركود ${res.code} → ${res.items.map((i) => i.n).join("، ") || "—"}`);
+    if (res.items.length === 1) {
+      const it = res.items[0];
+      beep(it.x || binOf(it.loc) === state.binCur ? "ok" : "warn");
+      if (binQtyMode) { openBinQty(it, "add"); return it; }
+      binAdd(it, 1);
+      return it;
+    }
+    beep("err");
+    openPick(res.code, res.items, res.part);
+    return null;
+  }
+  // اختيار صنف (باركود فيه أكثر من صنف / غير معروف / بحث يدوي)
+  let pick = null;
+  function openPick(code, candidates, query) {
+    pick = { code };
+    $("#pk-title").textContent = code ? (candidates.length ? "أكثر من صنف لهذا الباركود" : "باركود غير معروف") : "بحث يدوي";
+    $("#pk-sub").textContent = code ? `${code} — اختيارك يربطه بالصنف للمرات الجاية` : `يضاف للموقع ${state.binCur}`;
+    $("#pk-search").value = candidates.length ? "" : query || "";
+    renderPick(candidates);
+    openOverlay("pick-backdrop");
+    if (!candidates.length) setTimeout(() => $("#pk-search").focus(), 250);
+  }
+  function renderPick(candidates) {
+    const toks = parseText($("#pk-search").value);
+    const list = candidates?.length && !toks ? candidates : toks ? state.branchAll.filter((it) => matchText(it, toks)).slice(0, 60) : [];
+    $("#pk-list").innerHTML = list.map((it) => `<button class="pk-row" data-n="${esc(it.n)}"><b dir="ltr">${esc(it.n)}</b><span>${esc(it.name)}</span><small dir="ltr">${esc(it.loc || "—")} · ${fmt(it.q)}</small></button>`).join("")
+      || `<p class="muted pad">${toks ? "ما فيه نتائج" : "اكتب رقم أو اسم الصنف"}</p>`;
+  }
+  let pkT;
+  $("#pk-search").addEventListener("input", () => { clearTimeout(pkT); pkT = setTimeout(() => renderPick(null), 150); });
+  $("#pk-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-n]"); if (!b) return;
+    const it = itemByN(b.dataset.n); if (it) binPicked(it);
+  });
+  $("#pk-extra").addEventListener("click", () => { const q = $("#pk-search").value.trim(); closeOverlay("pick-backdrop"); openExtra(q || pick?.code || ""); });
+  function binPicked(it) {
+    closeOverlay("pick-backdrop");
+    if (pick?.code) { saveLink(pick.code, it.n); toast("✓ انربط الباركود بالصنف", 2000); }
+    pick = null;
+    if (binQtyMode) openBinQty(it, "add"); else binAdd(it, 1);
+  }
+  $("#bin-search").addEventListener("click", () => openPick(null, [], ""));
+
+  // ---- الكمية (للكراتين والتعديل) ----
+  let bq = null;
+  function openBinQty(it, mode) {
+    bq = { it, mode };
+    const cur = binDraft().q[it.n] || 0;
+    $("#bq-num").textContent = it.n; $("#bq-title").textContent = it.name;
+    $("#bq-sys").textContent = `النظام ${fmt(it.q)}${resv(it) ? ` · محجوز ${fmt(resv(it))}` : ""} · في ${state.binCur} الحين: ${fmt(cur)}`;
+    $("#bq-label").textContent = mode === "add" ? "كم حبة تضيف؟" : `الكمية في ${state.binCur}`;
+    $("#bq-input").value = mode === "add" ? "" : cur || "";
+    $("#bq-quick").innerHTML = [1, 5, 10, 12, 20, 24, 50, 100].map((v) => `<button type="button" data-v="${v}">${mode === "add" ? "" : "+"}${v}</button>`).join("");
+    $("#bq-remove").hidden = mode === "add" || !cur;
+    openOverlay("bq-backdrop");
+    setTimeout(() => $("#bq-input").focus(), 200);
+  }
+  $("#bq-quick").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-v]"); if (!b) return;
+    const v = +b.dataset.v, i = $("#bq-input");
+    i.value = bq?.mode === "add" ? v : (+i.value || 0) + v;
+    i.focus();
+  });
+  function saveBinQty() {
+    if (!bq) return;
+    const v = +toEnDigits($("#bq-input").value);
+    if (!Number.isFinite(v) || v < 0) { toast("كمية غير صحيحة"); return; }
+    const { it, mode } = bq; bq = null;
+    closeOverlay("bq-backdrop");
+    if (mode === "add") { if (v) binAdd(it, v); } else binSet(it, v);
+  }
+  $("#bq-save").addEventListener("click", saveBinQty);
+  $("#bq-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveBinQty(); } });
+  $("#bq-remove").addEventListener("click", () => { if (!bq) return; const it = bq.it; bq = null; closeOverlay("bq-backdrop"); binSet(it, 0); });
+  $("#bl-big").addEventListener("click", () => { const it = itemByN(binDraft().last); if (it) openBinQty(it, "set"); });
+  $("#bl-plus").addEventListener("click", () => { const it = itemByN(binDraft().last); if (it) binAdd(it, 1); });
+  $("#bl-minus").addEventListener("click", () => { const it = itemByN(binDraft().last); if (it) binAdd(it, -1); });
+  $("#bin-list").addEventListener("click", (e) => { const r = e.target.closest("[data-n]"); const it = r && itemByN(r.dataset.n); if (it) openBinQty(it, "set"); });
+  $("#bin-undo").addEventListener("click", () => {
+    const d = binDraft(); const h = d.hist.pop(); if (!h) { toast("ما فيه شيء نتراجع عنه"); return; }
+    if (h.prev > 0) d.q[h.n] = h.prev; else delete d.q[h.n];
+    d.last = h.prev > 0 ? h.n : d.order.filter((n) => d.q[n] > 0).at(-1) || null;
+    saveDrafts(); renderBin(); toast("↶ تراجع");
+  });
+  $("#bin-qtymode").addEventListener("click", () => {
+    binQtyMode = !binQtyMode; store.set("inv_qtymode", binQtyMode); renderBin();
+    toast(binQtyMode ? "🔢 وضع الكمية: كل ضربة تسألك كم حبة" : "كل ضربة = حبة وحدة");
+  });
+  $("#bin-cam").addEventListener("click", openCamera);
+  $("#bin-back").addEventListener("click", () => {
+    const d = binDraft();
+    if (Object.keys(d.q).length) toast("المسودة محفوظة — ترجع تكمل هذا الموقع بأي وقت", 2500);
+    go("bins/" + state.round.id);
+  });
+
+  // ---- قفل الموقع ----
+  $("#bin-close").addEventListener("click", () => {
+    const r = state.round, bin = state.binCur, d = binDraft();
+    const scanned = Object.keys(d.q).filter((n) => d.q[n] > 0);
+    const pieces = scanned.reduce((s, n) => s + d.q[n], 0);
+    const expected = roundItemsOf(r).filter((it) => !it.x && binOf(it.loc) === bin);
+    const missing = expected.filter((it) => !d.q[it.n]);
+    const fromOther = scanned.map(itemByN).filter((it) => it && !it.x && binOf(it.loc) !== bin);
+    $("#bc-title").textContent = `قفل الموقع ${bin}`;
+    $("#bc-body").innerHTML = `<div class="sc-nums rp-nums"><div><b>${fmt(scanned.length)}</b><small>صنف انمسح</small></div><div><b>${fmt(pieces)}</b><small>حبة</small></div>
+        <div class="${missing.length ? "w" : "okc"}"><b>${fmt(missing.length)}</b><small>ما انمسح</small></div><div><b>${fmt(fromOther.length)}</b><small>من موقع ثاني</small></div></div>` +
+      (missing.length ? `<p class="hint">هذي بالنظام في ${esc(bin)} وما انمسحت — <b>ما تتصفّر</b>، لو لقيتوها برف ثاني تنحسب، واللي يبقى يطلع بمراجعة الفروقات:</p>
+        <div class="bc-miss">${missing.slice(0, 30).map((it) => `<div><b dir="ltr">${esc(it.n)}</b><span>${esc(it.name)}</span><small>نظام ${fmt(it.q)}</small></div>`).join("")}${missing.length > 30 ? `<p class="muted">+ ${missing.length - 30} صنف</p>` : ""}</div>` : `<p class="okc">✓ كل أصناف الموقع انمسحت</p>`);
+    const next = roundBins(r).find((b) => b.bin !== bin && !["closed", "busy"].includes(binStatus(b.bin).st) && binCmp(b.bin, bin) > 0)
+      || roundBins(r).find((b) => b.bin !== bin && !["closed", "busy"].includes(binStatus(b.bin).st));
+    $("#bc-next").textContent = next ? `قفل وافتح ${next.bin} ←` : "قفل — هذا آخر موقع";
+    $("#bc-next").dataset.next = next?.bin || "";
+    openOverlay("bc-backdrop");
+  });
+  // الاعتماد: إدخال لكل صنف بفرق المسودة عن المعتمد (أول مرة "جرد"، بعدها "تصحيح")
+  function commitBin() {
+    const r = state.round, bin = state.binCur, key = binKey(bin), d = drafts[key] || { q: {} };
+    const had = binCommitted(r, bin);
+    const u = me(), now = Date.now();
+    let n = 0;
+    for (const num of new Set([...Object.keys(d.q), ...had.keys()])) {
+      const want = d.q[num] || 0, prev = had.get(num) || 0;
+      if (want === prev) continue;
+      const it = itemByN(num); if (!it) continue;
+      const entry = { id: window.DB.uuid(), qty: want - prev, by: u?.name, u: myId(), at: now, kind: prev ? "fix" : "count", bin };
+      commitExtra(it);
+      const k = keyOf(it);
+      const c = state.counts[k] ||= { entries: [], note: "" };
+      c.entries.push(entry); normCount(c);
+      pushEntry(it, entry);
+      // الموقع يبقى الأصلي. الصنف اللي ما له موقع بالنظام ياخذ الرف اللي انوجد فيه
+      if (!hasRealLoc(it.loc) && !c.loc) { c.loc = bin; pushMeta(it, c); }
+      if (!state.branchItems.includes(it)) state.branchItems.push(it);
+      n++;
+    }
+    saveCounts();
+    delete drafts[key]; saveDrafts();
+    pushBin(bin, "closed");
+    return n;
+  }
+  $("#bc-next").addEventListener("click", () => {
+    const next = $("#bc-next").dataset.next;
+    commitBin(); closeOverlay("bc-backdrop");
+    navigator.vibrate?.(30);
+    if (next) { toast(`✓ انقفل ${state.binCur} — فتحنا ${next}`); openBin(next); }
+    else { toast(`✓ انقفل ${state.binCur}`); go("bins/" + state.round.id); }
+  });
+  $("#bc-list").addEventListener("click", () => {
+    commitBin(); closeOverlay("bc-backdrop");
+    toast(`✓ انقفل ${state.binCur}`);
+    go("bins/" + state.round.id);
+  });
 
   /* ---------- النوافذ المنبثقة ---------- */
   function openOverlay(id) { $("#" + id).hidden = false; }
@@ -1100,7 +1456,7 @@
       c.entries.map((e, i) => {
         const canDel = !rv && (isAdmin() || (e.u && e.u === myId()));
         const fix = e.kind === "fix";
-        return `<div class="ent${fix ? " fix" : ""}"><b>${fix && e.qty > 0 ? "+" : ""}${fmt(e.qty)}</b><span>${fix ? "تصحيح · " : ""}${esc(e.by || "—")} · ${fmtTime(e.at)}</span>${
+        return `<div class="ent${fix ? " fix" : ""}"><b>${fix && e.qty > 0 ? "+" : ""}${fmt(e.qty)}</b><span>${e.bin ? `<i class="ent-bin" dir="ltr">${esc(e.bin)}</i>` : ""}${fix ? "تصحيح · " : ""}${esc(e.by || "—")} · ${fmtTime(e.at)}</span>${
           canDel ? `<button type="button" data-ent="${i}" aria-label="حذف هذا الإدخال"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ""}</div>`;
       }).join("") +
       (c.ver ? `<div class="ent ver"><b>✓</b><span>أكّده ${esc(c.ver.by || "")} · ${fmtTime(c.ver.at)}</span></div>` : "");
@@ -1301,6 +1657,7 @@
       if (!state.branchAll.includes(it)) state.branchAll.push(it);
     }
     closeOverlay("extra-backdrop");
+    if (state.screen === "bin") { binPicked(it); return; }
     openSheet(it);
   });
   $("#x-name").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#x-go").click(); });
@@ -1330,7 +1687,14 @@
       for (const [code, n, , deleted] of ch.barcodes) { if (deleted) delete state.links[code]; else state.links[code] = n; }
       store.set(LS_LINKS, state.links);
     }
-    for (const [id, branch, n, qty, uid, by, at, deleted, round, kind] of ch.entries) {
+    let binsChanged = false;
+    for (const [round, bin, status, uid, by, at] of ch.bins || []) {
+      const k = `${round}|${bin}`, cur = state.binSt[k];
+      if (cur && cur.at > at && cur.u === myId()) continue;          // تغييري المحلي أحدث
+      state.binSt[k] = { status, u: uid, by, at: +at }; binsChanged = true;
+    }
+    if (binsChanged) store.set(LS_BINST, state.binSt);
+    for (const [id, branch, n, qty, uid, by, at, deleted, round, kind, bin] of ch.entries) {
       if (!round) continue;
       const key = `${round}|${n}`;
       let c = state.counts[key];
@@ -1345,7 +1709,7 @@
       if (!c) c = state.counts[key] = { entries: [], note: "" };
       const ex = c.entries.find((e) => e.id === id);
       if (ex) { if (ex.qty !== +qty) { ex.qty = +qty; normCount(c); touched.add(key); } continue; }
-      c.entries.push({ id, qty: +qty, by, u: uid, at: +at, kind: kind || "count" });
+      c.entries.push({ id, qty: +qty, by, u: uid, at: +at, kind: kind || "count", bin: bin || undefined });
       c.entries.sort((a, b) => a.at - b.at);
       normCount(c); touched.add(key);
     }
@@ -1386,6 +1750,13 @@
     if (ch.itemsChanged || state.needReload) {
       if (state.editing) state.needReload = true;
       else { state.needReload = false; reloadItems().then(() => toast("✓ تم تحديث المخزون من الإدارة")).catch(() => {}); return; }
+    }
+    if ((state.screen === "bins" || state.screen === "bin") && state.round) {
+      const r = state.rounds[state.round.id];
+      if (roundsChanged && (!r || r.status !== "open" || !myRounds().includes(r))) { if (!$$(".sheet-backdrop:not([hidden])").length) go("branches"); return; }
+      if (r) state.round = r;
+      if (state.screen === "bins" && (binsChanged || touched.size || roundsChanged)) renderBins();
+      return;
     }
     if (!state.data || (!touched.size && !extrasChanged && !roundsChanged)) return;
     // تحديث الشاشة الحالية بدون ما نرجّع المستخدم لفوق
@@ -1509,7 +1880,7 @@
       return [roundTitle(r), branchLabel(state.data.branches[it.b]), it.n, it.name, type, it.loc, c?.loc ?? "",
         ...(blind ? [] : [it.q, it.r]), c?.qty ?? "", ...(blind ? [] : [c ? finalOf(it, c) : "", c ? diffOf(it, c) : ""]),
         c ? c.entries.map((e) => `${e.kind === "fix" && e.qty > 0 ? "+" : ""}${e.qty} (${e.kind === "fix" ? "تصحيح " : ""}${e.by || ""})`).join(" ، ") : "",
-        c?.ver ? `${c.ver.by || ""} ${dt(c.ver.at)}` : "", c?.note ?? "", c?.by ?? "", c ? dt(c.at) : ""];
+        c?.ver ? `${c.ver.by || ""} ${dt(c.ver.at)}` : "", [c?.note, extraBinsNote(it, c)].filter(Boolean).join(" · "), c?.by ?? "", c ? dt(c.at) : ""];
     });
     return [head, ...out];
   }
@@ -1719,6 +2090,7 @@
   });
   $("#rd-save").addEventListener("click", () => {
     const from = cleanLoc($("#rd-from").value), to = cleanLoc($("#rd-to").value);
+    if (!editingRound && !$("#rd-branch").value) { toast("اختر الفرع"); return; }
     const users = $$("#rd-users input:checked").map((i) => i.value);
     const fields = { loc_from: from, loc_to: to, name: $("#rd-name").value.trim(), users };
     if (!from && !to && !confirm("ما حددت مواقع — يعني جرد الفرع كامل. متأكد؟")) return;
@@ -2549,7 +2921,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "20";
+  const APP_VER = "21";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 

@@ -682,3 +682,77 @@ body.review #extra-btn { display: none; }
 .scan-btn { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.25); }
 .scan-btn.on { background: #e8a33d; color: #1d1405; }
 .scan-hint { position: absolute; left: 0; right: 0; top: calc(44% + min(17vw, 85px) + 22px); text-align: center; color: #fff; font-size: 15px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,.6); margin: 0; padding: 0 20px; }
+
+/* ===================== جرد الباركود: موقع موقع ===================== */
+.mode-chip { height: 28px; padding: 0 10px; border-radius: 99px; font-size: 12.5px; font-weight: 700; color: #fff; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); white-space: nowrap; }
+#screen-inventory .tb-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mode-opts { display: grid; gap: 10px; margin-bottom: 8px; }
+.mode-opt { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 16px; border: 1.5px solid var(--line); background: var(--surface-2); text-align: right; }
+.mode-opt:active { border-color: var(--primary-2); }
+.mode-opt b { display: block; font-size: 16px; } .mode-opt small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.mo-ic { font-size: 28px; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; background: var(--surface); flex: none; }
+
+/* قائمة المواقع */
+#screen-bins, #screen-bin { height: var(--app-h, 100dvh); }
+.bins-body { flex: 1; overflow-y: auto; padding: 12px 12px calc(20px + var(--safe-b)); }
+.bins-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.bins-head b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; } .bins-head small { color: var(--muted); font-size: 12px; }
+.bins-head .btn { height: 48px; font-size: 15px; }
+.bins-open { display: flex; gap: 6px; margin-bottom: 12px; }
+.bins-open input { flex: 1; min-width: 0; height: 42px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 12px; padding: 0 12px; font: inherit; color: inherit; text-transform: uppercase; }
+.bins-open .btn { height: 42px; padding: 0 16px; }
+.bin-row { width: 100%; display: grid; grid-template-columns: 74px 1fr auto; align-items: center; gap: 8px; padding: 12px; margin-bottom: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); text-align: right; }
+.bin-row b { font-size: 17px; font-variant-numeric: tabular-nums; text-align: left; }
+.bin-row span { font-size: 13px; color: var(--muted); }
+.bin-row i { font-style: normal; font-size: 12px; font-weight: 700; }
+.bin-row.st-closed { background: color-mix(in srgb, var(--ok-bg) 70%, var(--surface)); } .bin-row.st-closed i { color: var(--ok); }
+.bin-row.st-draft { border-color: var(--primary-2); } .bin-row.st-draft i { color: var(--primary-2); }
+.bin-row.st-busy { opacity: .7; } .bin-row.st-busy i { color: var(--warn); }
+
+/* داخل الموقع */
+.bin-code { font-size: 20px; letter-spacing: .5px; }
+.bin-last { padding: 10px 12px 6px; }
+.bl-empty { display: flex; align-items: center; justify-content: center; gap: 10px; height: 116px; border-radius: 16px; border: 2px dashed var(--line); color: var(--muted); font-weight: 600; }
+.bl-empty svg { width: 28px; height: 28px; }
+.bl-card { border-radius: 16px; padding: 12px 14px; background: var(--surface); border: 2px solid var(--primary-2); box-shadow: var(--shadow); display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+.bl-info { min-width: 0; }
+.bl-num { display: block; font-size: 18px; font-weight: 700; color: var(--primary-2); text-align: right; }
+.bl-name { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bl-tag { display: block; font-size: 12px; font-weight: 600; color: var(--muted); min-height: 16px; } .bl-tag.w { color: var(--warn); }
+.bl-qty { display: flex; align-items: center; gap: 6px; }
+.bl-qty button { width: 42px; height: 42px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); font-size: 22px; font-weight: 700; }
+.bl-qty .bl-big { width: auto; min-width: 72px; height: 56px; padding: 0 10px; font-size: 32px; background: var(--primary); color: #fff; border: 0; font-variant-numeric: tabular-nums; }
+[data-theme="dark"] .bl-qty .bl-big { color: #0d1520; }
+.bl-sys { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.bin-tools { display: flex; align-items: center; gap: 6px; padding: 4px 12px 8px; overflow-x: auto; scrollbar-width: none; }
+.bin-tools .chip { white-space: nowrap; }
+.bin-total { margin-inline-start: auto; font-size: 12.5px; color: var(--muted); white-space: nowrap; font-weight: 600; }
+.bin-list { flex: 1; overflow-y: auto; padding: 0 12px 10px; }
+.bin-item { display: grid; grid-template-columns: 1fr auto 54px; align-items: center; gap: 8px; padding: 10px; margin-bottom: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
+.bin-item.on { background: color-mix(in srgb, var(--ok-bg) 55%, var(--surface)); }
+.bin-item.last { border-color: var(--primary-2); }
+.bi-t { min-width: 0; } .bi-t b { font-size: 14px; color: var(--primary-2); } .bi-t small { display: block; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bi-sys { font-size: 11.5px; color: var(--muted); text-align: center; } .bi-sys b { display: block; font-size: 15px; color: var(--text); } .bi-sys i { display: block; font-style: normal; color: var(--warn); }
+.bi-q { font-size: 22px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.bin-item:not(.on) .bi-q { color: var(--line); }
+.bin-sep { margin: 12px 4px 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.bin-bar { display: flex; gap: 8px; padding: 8px 12px calc(8px + var(--safe-b)); background: var(--surface); border-top: 1px solid var(--line); }
+.bin-bar .cam-btn { width: 56px; height: 52px; flex: none; }
+.bin-close { flex: 1; height: 52px; font-size: 17px; }
+body.kb .bin-last { display: none; }
+
+/* الكمية / الاختيار / القفل */
+.bq-sys { margin: -6px 0 10px; font-size: 13px; }
+.bq-input { font-size: 30px !important; text-align: center; font-weight: 700; height: 64px; }
+.bq-quick { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 14px; }
+.bq-quick button { flex: 1 0 calc(25% - 6px); height: 40px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); font-weight: 700; font-variant-numeric: tabular-nums; }
+.pk-search { width: 100%; height: 46px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 12px; padding: 0 12px; font: inherit; color: inherit; margin-bottom: 8px; }
+.pk-list { max-height: 46dvh; overflow-y: auto; margin-bottom: 10px; }
+.pk-row { width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 10px; border-bottom: 1px solid var(--line); text-align: right; }
+.pk-row b { color: var(--primary-2); font-size: 14px; } .pk-row span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pk-row small { color: var(--muted); font-size: 11.5px; }
+.bc-miss { max-height: 30dvh; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; }
+.bc-miss div { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.bc-miss b { color: var(--primary-2); } .bc-miss span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .bc-miss small { color: var(--muted); }
+.bc-acts { display: grid; gap: 8px; }
+.ent-bin { font-style: normal; font-weight: 700; color: var(--primary-2); margin-inline-end: 6px; }
+.bl-num { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 17px; }

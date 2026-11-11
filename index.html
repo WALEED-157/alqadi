@@ -185,10 +185,79 @@
   <main class="branch-list" id="branch-list"></main>
 </section>
 
+<!-- ============ جرد الباركود: قائمة المواقع ============ -->
+<section id="screen-bins" class="screen">
+  <header class="topbar">
+    <span class="tb-side tb-right"><button type="button" class="mode-chip" id="to-normal" title="الجرد العادي">📋 عادي</button></span>
+    <span class="tb-title" id="bins-title">—</span>
+    <button class="tb-side tb-left back-btn" data-back="branches" aria-label="رجوع">
+      رجوع
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+  </header>
+  <div class="inv-progress"><span id="bins-bar"></span></div>
+  <main class="bins-body">
+    <div class="bins-head">
+      <div><b id="bins-count">0/0</b><small>موقع انقفل</small></div>
+      <button class="btn primary" id="bins-next">ابدأ من أول موقع باقي</button>
+    </div>
+    <div class="bins-open">
+      <input id="bins-goto" dir="ltr" placeholder="أو اكتب موقع (مثال A150)" autocapitalize="characters" autocomplete="off" enterkeyhint="go">
+      <button class="btn ghost" id="bins-goto-btn">فتح</button>
+    </div>
+    <div id="bins-list"></div>
+  </main>
+</section>
+
+<!-- ============ جرد الباركود: داخل الموقع ============ -->
+<section id="screen-bin" class="screen">
+  <header class="topbar">
+    <span class="tb-side tb-right"><span class="tb-label" id="bin-sub">—</span></span>
+    <span class="tb-title bin-code" id="bin-title" dir="ltr">—</span>
+    <button class="tb-side tb-left back-btn" id="bin-back" aria-label="رجوع">
+      المواقع
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+  </header>
+  <div class="bin-last" id="bin-last">
+    <div class="bl-empty" id="bl-empty">
+      <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+      <span>اضرب الباركود — كل ضربة = حبة</span>
+    </div>
+    <div class="bl-card" id="bl-card" hidden>
+      <div class="bl-info">
+        <span class="bl-num" id="bl-num" dir="ltr"></span>
+        <span class="bl-name" id="bl-name"></span>
+        <span class="bl-tag" id="bl-tag"></span>
+      </div>
+      <div class="bl-qty">
+        <button type="button" id="bl-minus" aria-label="نقص">−</button>
+        <button type="button" class="bl-big" id="bl-big" title="اكتب الكمية">0</button>
+        <button type="button" id="bl-plus" aria-label="زيادة">+</button>
+      </div>
+      <small class="bl-sys" id="bl-sys"></small>
+    </div>
+  </div>
+  <div class="bin-tools">
+    <button type="button" class="chip" id="bin-qtymode" title="كل ضربة تفتح لوحة الأرقام">🔢 وضع الكمية</button>
+    <button type="button" class="chip" id="bin-undo">↶ تراجع</button>
+    <button type="button" class="chip" id="bin-search">🔍 بحث يدوي</button>
+    <span class="bin-total" id="bin-total"></span>
+  </div>
+  <div class="bin-list" id="bin-list"></div>
+  <div class="bin-bar">
+    <button type="button" class="cam-btn" id="bin-cam" aria-label="الكاميرا">
+      <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+    </button>
+    <button type="button" class="btn primary bin-close" id="bin-close">✓ قفل الموقع</button>
+  </div>
+</section>
+
 <!-- ============ جدول الجرد ============ -->
 <section id="screen-inventory" class="screen">
   <header class="topbar">
     <span class="tb-side tb-right">
+      <button type="button" class="mode-chip" id="to-scan" title="جرد بالباركود موقع موقع">⚡ باركود</button>
       <span class="tb-label" id="inv-tb-label">الجرد المخزني</span>
       <span class="loc-pin" id="loc-pin" hidden></span>
     </span>
@@ -523,6 +592,72 @@
     <div class="imp-progress" id="imp-progress" hidden><span id="imp-bar"></span><b id="imp-ptext"></b></div>
     <p class="error" id="imp-error" hidden></p>
     <button class="btn primary block" id="imp-apply" hidden>تأكيد ورفع</button>
+  </div>
+</div>
+
+<!-- ============ اختيار طريقة الجرد ============ -->
+<div class="sheet-backdrop" id="mode-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mode-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head"><h3 id="mode-title">طريقة الجرد</h3></div>
+    <div class="mode-opts">
+      <button type="button" class="mode-opt" data-mode="normal">
+        <span class="mo-ic">📋</span><span><b>الجرد العادي</b><small>القائمة والبحث وكتابة الكمية لكل صنف</small></span>
+      </button>
+      <button type="button" class="mode-opt" data-mode="scan">
+        <span class="mo-ic">⚡</span><span><b>جرد بالباركود — موقع موقع</b><small>تفتح الرف، كل ضربة سكانر = حبة، تقفله وتنتقل للي بعده</small></span>
+      </button>
+    </div>
+    <p class="hint">تقدر تبدّل بينهم بأي وقت — الاثنين يسجلون بنفس الجرد</p>
+  </div>
+</div>
+
+<!-- ============ كمية الصنف في الموقع ============ -->
+<div class="sheet-backdrop" id="bq-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="bq-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <div><div class="sh-num" id="bq-num" dir="ltr"></div><h3 id="bq-title"></h3></div>
+      <button class="icon-btn sm" data-close="bq-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <p class="muted bq-sys" id="bq-sys"></p>
+    <label class="field"><span id="bq-label">الكمية في هذا الموقع</span>
+      <input id="bq-input" type="number" inputmode="numeric" lang="en" min="0" step="1" enterkeyhint="done" class="bq-input"></label>
+    <div class="bq-quick" id="bq-quick"></div>
+    <div class="two">
+      <button class="btn ghost danger" id="bq-remove">حذف من الموقع</button>
+      <button class="btn primary" id="bq-save">حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ اختيار صنف (بحث يدوي / باركود غير معروف) ============ -->
+<div class="sheet-backdrop" id="pick-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pk-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <div><h3 id="pk-title">اختر الصنف</h3><p class="muted x-sub" id="pk-sub"></p></div>
+      <button class="icon-btn sm" data-close="pick-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <input id="pk-search" class="pk-search" type="search" placeholder="ابحث برقم أو اسم الصنف…" autocomplete="off">
+    <div class="pk-list" id="pk-list"></div>
+    <button type="button" class="btn ghost block" id="pk-extra">+ ما هو موجود — إضافة كصنف زائد</button>
+  </div>
+</div>
+
+<!-- ============ قفل الموقع ============ -->
+<div class="sheet-backdrop" id="bc-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="bc-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h3 id="bc-title">قفل الموقع</h3>
+      <button class="icon-btn sm" data-close="bc-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div id="bc-body"></div>
+    <div class="bc-acts">
+      <button class="btn primary block" id="bc-next">قفل وافتح الموقع التالي ←</button>
+      <button class="btn ghost block" id="bc-list">قفل والرجوع لقائمة المواقع</button>
+    </div>
   </div>
 </div>
 
