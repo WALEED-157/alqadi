@@ -80,7 +80,7 @@
 
   // تحليل الموقع: B057+060 → {p:"B", n:57}
   function parseLoc(s) {
-    const m = toEnDigits(s).toUpperCase().match(/^\s*([A-Z]+)\s*-?\s*(\d+)/);
+    const m = toEnDigits(s).toUpperCase().match(/^\s*([A-Z]+)\s*[-+]?\s*(\d+)/);   // B057 / FR-03 / FR+11
     return m ? { p: m[1], n: parseInt(m[2], 10) } : null;
   }
   const cmpLoc = (a, b) => (a.p === b.p ? a.n - b.n : a.p < b.p ? -1 : 1);
@@ -565,6 +565,41 @@
     }
   }
 
+  /* ---------- ترتيب القائمة ---------- */
+  // مفتاح الموقع للترتيب: الحرف، ثم "بدون رقم" قبل الأرقام، ثم الرقم. اللي بدون موقع آخر شيء
+  function locKey(it) {
+    const L = cleanLoc(effLoc(it));
+    const letter = L.match(/^[A-Z]+/)?.[0];
+    if (!letter) return ["~", -1, L];
+    const p = parseLoc(L);
+    return [letter, p ? p.n : -1, L];
+  }
+  const byNum = (a, b) => a.n.localeCompare(b.n, "en", { numeric: true });
+  const byLoc = (a, b) => {
+    const x = locKey(a), y = locKey(b);
+    return (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0) || x[1] - y[1] || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0) || byNum(a, b);
+  };
+  // الفرق الأكبر أول (زيادة أو نقص) — اللي ما انجرد يُحسب بالرف = 0
+  const absDiff = (it) => Math.abs((countOf(it)?.qty || 0) + resv(it) - it.q);
+  const SORTERS = { loc: byLoc, num: byNum, diff: (a, b) => absDiff(b) - absDiff(a) || byLoc(a, b) };
+  const SORT_AR = { "": "حسب النظام", loc: "الموقع", num: "رقم الصنف", diff: "كمية الفرق (الأكبر أول)" };
+  const sortPref = store.get("inv_sort", { open: "", review: "diff" });
+  const currentSort = () => sortPref[state.mode === "review" ? "review" : "open"] || "";
+  $("#sort-btn").addEventListener("click", () => {
+    const opts = state.mode === "review" ? ["diff", "loc", "num"] : ["", "loc", "num", "diff"];
+    $("#sort-opts").innerHTML = opts.map((k) =>
+      `<button type="button" class="sort-opt${currentSort() === k ? " on" : ""}" data-k="${k}"><span>${SORT_AR[k]}</span><i></i></button>`).join("");
+    openOverlay("sort-backdrop");
+  });
+  $("#sort-opts").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-k]"); if (!b) return;
+    sortPref[state.mode === "review" ? "review" : "open"] = b.dataset.k;
+    store.set("inv_sort", sortPref);
+    closeOverlay("sort-backdrop");
+    applyFilter();
+    toast("الترتيب: " + SORT_AR[b.dataset.k]);
+  });
+
   function applyFilter() {
     if (!state.round) return;
     const { locTests, textTests, preview } = buildFilters();
@@ -576,13 +611,11 @@
       if (locTests.length) { const L = effLoc(it) || ""; if (!locTests.every((f) => f(L))) return false; }
       return textTests.every((t) => matchText(it, t));
     });
-    if (locTests.length) {
-      list = list.slice().sort((a, b) => {
-        const la = parseLoc(effLoc(a)), lb = parseLoc(effLoc(b));
-        if (la && lb) return cmpLoc(la, lb) || a.n.localeCompare(b.n);
-        return String(effLoc(a)).localeCompare(String(effLoc(b)));
-      });
-    }
+    // الترتيب: اللي اختاره الموظف، وإلا المراجعة = الفرق الأكبر، ونطاق المواقع = بالموقع
+    const sort = currentSort() || (locTests.length ? "loc" : "");
+    const cmp = SORTERS[sort];
+    if (cmp) list = list.slice().sort(cmp);
+    $("#sort-btn").classList.toggle("on", !!currentSort() && !(state.mode === "review" && currentSort() === "diff"));
     state.filtered = list;
     state.rendered = 0;
     $("#tbody").innerHTML = "";
@@ -613,7 +646,12 @@
     return `<div class="trow${cls}" data-i="${it.i}">
       <span class="t-item"><span class="t-num">${esc(it.n)}${it.x ? '<i class="xb">زائد</i>' : ""}${out ? '<i class="xb ob">خارج النطاق</i>' : ""}${c?.ver ? '<i class="xb vb">✓ مؤكد</i>' : ""}</span><span class="t-name">${esc(it.name)}</span></span>
       <span class="t-loc${c && (L || "") !== (it.loc || "") ? " changed" : ""}">${esc(L || "—")}</span>
-      <span class="t-q"><span class="sys">${fmt(it.q)}</span>${resv(it) ? `<span class="rsv">محجوز ${fmt(resv(it))}</span>` : ""}${c ?`<span class="cnt${diff ? " d" : ""}">${multi ? "Σ " : "جرد "}${fmt(c.qty)}</span>` : ""}</span>
+      <span class="t-q"><span class="sys">${fmt(it.q)}</span>${resv(it) ? `<span class="rsv">محجوز ${fmt(resv(it))}</span>` : ""}${c ?`<span class="cnt${diff ? " d" : ""}">${multi ? "Σ " : "جرد "}${fmt(c.qty)}</span>` : ""}${(() => {
+        // المراجعة: كمية الفرق على السطر (+ زيادة / − نقص)
+        if (!rv || isBlind() || c?.ver) return "";
+        const d = (c?.qty || 0) + resv(it) - it.q;
+        return d ? `<span class="dq ${d > 0 ? "p" : "m"}" dir="ltr">${d > 0 ? "+" : "−"}${fmt(Math.abs(d))}</span>` : "";
+      })()}</span>
       <button class="edit-btn" aria-label="تعديل">${c
         ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>'
         : '<svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'}</button>
@@ -856,8 +894,9 @@
     // صنف موقعه بالنظام خارج نطاق الجولة (أو بدون موقع): ينجرد هنا ونعدّل موقعه
     const out = !it.x && !inRange(state.round, it);
     const on = $("#sh-onote");
-    on.hidden = !out && !!it.loc;
-    on.textContent = !it.loc ? "هذا الصنف بدون موقع بالنظام — اكتب الموقع اللي لقيته فيه"
+    const realLoc = hasRealLoc(it.loc);
+    on.hidden = !out && realLoc;
+    on.textContent = !realLoc ? "هذا الصنف بدون موقع بالنظام — اكتب الموقع اللي لقيته فيه"
       : `موقعه بالنظام ${it.loc} (خارج نطاق هذا الجرد) — اكتب الموقع اللي لقيته فيه`;
     cnt.value = "";
     const rv = state.mode === "review";
@@ -869,7 +908,7 @@
     renderEntries();
     updateDiff();
     openOverlay("sheet-backdrop");
-    setTimeout(() => ((out || !it.loc) && !c && !rv ? $("#sh-loc") : cnt).focus(), 250);
+    setTimeout(() => ((out || !realLoc) && !c && !rv ? $("#sh-loc") : cnt).focus(), 250);
   }
   const closeSheet = () => closeOverlay("sheet-backdrop");
 
@@ -1433,7 +1472,7 @@
       if (!g.has(letter)) g.set(letter, { p: letter, min: Infinity, minS: "", max: -Infinity, maxS: "", cnt: 0, plain: 0 });
       const cur = g.get(letter);
       cur.cnt++;
-      const raw = L.match(/^[A-Z]+-?\d+/)?.[0];
+      const raw = L.match(/^[A-Z]+[-+]?\d+/)?.[0];
       const p = parseLoc(raw);
       if (!p) { cur.plain++; continue; }
       if (p.n < cur.min) { cur.min = p.n; cur.minS = raw; }
@@ -1803,7 +1842,7 @@
     for (const it of branchItemsOf(locsBranch)) {
       // الموقع: B057 أو الحرف بس (A) لو مكتوب بدون رقم
       const L = cleanLoc(it.loc);
-      const bin = L.match(/^[A-Z]+-?\d+/)?.[0] || L.match(/^[A-Z]+$/)?.[0];
+      const bin = L.match(/^[A-Z]+[-+]?\d+/)?.[0] || L.match(/^[A-Z]+$/)?.[0];
       if (!bin) { noLoc++; continue; }
       bins.set(bin, (bins.get(bin) || 0) + 1);
     }
@@ -1825,7 +1864,7 @@
       const c = { done: 0, prog: 0, left: 0 };
       list.forEach((x) => { c[x.st]++; tot[x.st]++; });
       return `<div class="loc-group"><div class="lg-head"><b>${esc(p)}</b><small>${fmt(list.length)} موقع · <span class="okc">تم ${fmt(c.done)}</span> · <span class="w">جاري ${fmt(c.prog)}</span> · باقي ${fmt(c.left)}</small></div>
-        <div class="lg-bins">${list.map((x) => `<button class="bin ${x.st}${locsSel === x.bin ? " sel" : ""}" data-bin="${esc(x.bin)}" title="${esc(x.bin)} · ${x.n} صنف">${x.num < 0 ? "بدون رقم" : esc(x.bin.replace(/^[A-Z]+-?/, ""))}</button>`).join("")}</div>
+        <div class="lg-bins">${list.map((x) => `<button class="bin ${x.st}${locsSel === x.bin ? " sel" : ""}" data-bin="${esc(x.bin)}" title="${esc(x.bin)} · ${x.n} صنف">${x.num < 0 ? "بدون رقم" : esc(x.bin.replace(/^[A-Z]+[-+]?/, ""))}</button>`).join("")}</div>
         ${list.some((x) => x.bin === locsSel) ? binDetail(list.find((x) => x.bin === locsSel)) : ""}</div>`;
     }).join("");
     const all = tot.done + tot.prog + tot.left;
@@ -1835,9 +1874,64 @@
       <div class="sc-nums rp-nums">
         <div><b>${all ? Math.round((tot.done / all) * 100) : 0}%</b><small>من مواقع الفرع</small></div>
         <div class="okc"><b>${fmt(tot.done)}</b><small>موقع انجرد</small></div><div class="w"><b>${fmt(tot.prog)}</b><small>جاري</small></div>
-        <div><b>${fmt(tot.left)}</b><small>باقي</small></div><div><b>${fmt(noLoc)}</b><small>صنف بدون موقع</small></div></div>` +
+        <div><b>${fmt(tot.left)}</b><small>باقي</small></div></div>` +
+      `<button class="nl-card" id="nl-open"${noLoc ? "" : " disabled"}>
+        <span class="nl-ic"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><path d="M9 7l6 6M15 7l-6 6"/></svg></span>
+        <span class="nl-t"><b>${fmt(noLoc)}</b> صنف بدون موقع أو موقعه (-)<small>${noLoc ? "اضغط للقائمة — تقدر تصدّرها أو تسوي لها جرد سريع" : "كل الأصناف لها موقع ✓"}</small></span>
+        <svg class="chev" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>` +
       (html || `<p class="muted pad">ما فيه مواقع بهذا الفرع</p>`);
   }
+
+  // ---- أصناف بدون موقع (فاضي، "-"، أو أي شيء ما يبدأ بحرف رف) ----
+  const hasRealLoc = (loc) => { const L = cleanLoc(loc); return /^[A-Z]+[-+]?\d+/.test(L) || /^[A-Z]+$/.test(L); };
+  const noLocItems = (bname) => branchItemsOf(bname).filter((it) => !hasRealLoc(it.loc)).sort(byNum);
+  let nlList = [];
+  function renderNoLoc() {
+    const q = $("#nl-search").value.trim();
+    const toks = parseText(q);
+    const list = toks ? nlList.filter((it) => matchText(it, toks)) : nlList;
+    const shown = list.slice(0, 400);
+    $("#nl-list").innerHTML = shown.length ? `<table class="rp-table qk-table nl-table"><thead><tr><th>رقم الصنف</th><th>اسم الصنف</th><th>الموقع</th><th>المتوفر</th><th>المحجوز</th></tr></thead><tbody>` +
+      shown.map((it) => `<tr><td dir="ltr">${esc(it.n)}</td><td>${esc(it.name)}</td><td dir="ltr" class="muted">${esc(it.loc || "فاضي")}</td><td>${fmt(it.q)}</td><td>${it.r ? fmt(it.r) : ""}</td></tr>`).join("") +
+      `</tbody></table>${list.length > shown.length ? `<p class="hint pad">يعرض أول 400 من ${fmt(list.length)} — التصدير فيه الكل</p>` : ""}`
+      : `<p class="muted pad">ما فيه نتائج</p>`;
+  }
+  $("#tab-locs").addEventListener("click", (e) => {
+    if (!e.target.closest("#nl-open")) return;
+    nlList = noLocItems(locsBranch);
+    $("#nl-title").textContent = `أصناف بدون موقع — ${branchLabel(locsBranch)}`;
+    const qty = nlList.reduce((s, it) => s + it.q, 0);
+    $("#nl-sub").textContent = `${fmt(nlList.length)} صنف · مجموع المتوفر ${fmt(qty)} حبة`;
+    $("#nl-search").value = "";
+    renderNoLoc();
+    openOverlay("noloc-backdrop");
+  });
+  let nlT;
+  $("#nl-search").addEventListener("input", () => { clearTimeout(nlT); nlT = setTimeout(renderNoLoc, 150); });
+  $("#nl-export").addEventListener("click", async () => {
+    try {
+      const X = await loadXLSX();
+      const wb = X.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
+      const sh = X.utils.aoa_to_sheet([["الفرع", "رقم الصنف", "اسم الصنف", "الموقع بالنظام", "المتوفر", "المحجوز"],
+        ...nlList.map((it) => [branchLabel(locsBranch), it.n, it.name, it.loc || "", it.q, it.r])]);
+      sh["!cols"] = [14, 20, 40, 14, 10, 10].map((w) => ({ wch: w }));
+      X.utils.book_append_sheet(wb, sh, "بدون موقع");
+      X.writeFile(wb, `بدون-موقع-${branchLabel(locsBranch)}-${today()}.xlsx`.replace(/[\\/:*?"<>|]/g, "-"));
+    } catch { toast("تعذّر إنشاء ملف Excel"); }
+  });
+  // جرد سريع لكل الأصناف اللي بدون موقع (الموظف يجردها ويكتب موقعها الصحيح)
+  $("#nl-quick").addEventListener("click", () => {
+    const items = nlList.map((it) => it.n);
+    if (!items.length) return;
+    closeOverlay("noloc-backdrop");
+    state.lastRoundBranch = locsBranch;
+    openQuick(null);
+    qk.sel = new Set(items);
+    $("#qk-only").checked = true;
+    $("#qk-name").value = `بدون موقع — ${branchLabel(locsBranch)}`;
+    applyQk();
+  });
   function binDetail(x) {
     const r = x.open || x.closed;
     const names = r ? (r.status === "closed" && r.summary?.counters ? r.summary.counters : [...roundCounters(r).keys()]) : [];
@@ -2265,7 +2359,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "18";
+  const APP_VER = "19";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 

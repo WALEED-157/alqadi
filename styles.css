@@ -643,3 +643,25 @@ body.review #extra-btn { display: none; }
 .admin-sync { color: #fff; opacity: .9; } .admin-sync .st { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
 @media (max-width: 899px) { .admin-sync .st { display: none; } }
 .diag { white-space: pre-wrap; direction: rtl; text-align: right; font: 12px/1.7 ui-monospace, Consolas, monospace; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; max-height: 55dvh; overflow: auto; margin: 0 0 8px; }
+
+/* ---------- الترتيب ---------- */
+#sort-btn.on { background: var(--primary-2); border-color: var(--primary-2); color: #fff; }
+.sort-opts { display: grid; gap: 8px; padding-bottom: 6px; }
+.sort-opt { display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 16px; border-radius: 14px; border: 1.5px solid var(--line); background: var(--surface-2); font-size: 15.5px; font-weight: 600; text-align: right; }
+.sort-opt i { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line); }
+.sort-opt.on { border-color: var(--primary-2); background: color-mix(in srgb, var(--primary-2) 8%, var(--surface)); }
+.sort-opt.on i { border-color: var(--primary-2); background: radial-gradient(circle, var(--primary-2) 45%, transparent 50%); }
+/* كمية الفرق بالمراجعة */
+.t-q .dq { display: block; margin-top: 2px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.t-q .dq.p { color: var(--ok); } .t-q .dq.m { color: var(--danger); }
+
+/* ---------- أصناف بدون موقع ---------- */
+.nl-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 10px; text-align: right; background: var(--surface); border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); border-radius: var(--radius); }
+.nl-card:disabled { opacity: .7; border-color: var(--line); cursor: default; }
+.nl-ic { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--warn-bg); color: var(--warn); flex: none; }
+.nl-t { flex: 1; font-size: 14.5px; } .nl-t b { font-size: 17px; color: var(--warn); } .nl-t small { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.nl-card .chev { width: 18px; height: 18px; color: var(--muted); }
+.nl-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.nl-bar input { flex: 1 1 200px; height: 40px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 0 12px; font: inherit; color: inherit; }
+.nl-bar .btn { height: 40px; font-size: 13.5px; }
+.nl-table td { cursor: default; }
