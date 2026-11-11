@@ -1,7 +1,7 @@
 // Service worker: الشبكة أولاً، والكاش عند انقطاع الإنترنت
 // (المخزون نفسه محفوظ في IndexedDB — هنا ملفات التطبيق بس)
 // cache: "no-cache" = نسأل السيرفر كل مرة لو الملف تغيّر (ما ناخذ نسخة المتصفح القديمة)
-const CACHE = "inv-v19";
+const CACHE = "inv-v20";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "db.js", "config.js", "vendor/supabase.js", "icon.svg", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

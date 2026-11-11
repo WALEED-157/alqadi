@@ -765,13 +765,186 @@
     applyFilter();
   });
 
-  $("#cam-btn").addEventListener("click", () => toast("مسح الباركود: بانتظار قاعدة الباركود"));
+  /* ===== الباركود =====
+     ملصق تويوتا: 13 خانة = 12 خانة رقم القطعة (لو الرقم 10 تنحشى بمسافتين) + خانة تحقق بالآخر
+       "4243160311  F" → 42431-60311     "110715002101J" → 11071-50021-01
+     الترتيب: 1) ربط تعلّمناه من تصحيح موظف  2) أول 12 خانة  3) أول 10  4) أطول رقم صنف يطابق بداية الباركود
+     لو ما طلع صح والموظف اختار الصنف يدوي → ينربط الباركود فيه للكل، والمرة الجاية يفتح على طول */
+  const LS_LINKS = CLOUD ? "inv_barcodes_cloud_v1" : "inv_barcodes_v1";
+  state.links = store.get(LS_LINKS, {});
+  const codeKey = (raw) => toEnDigits(String(raw ?? "")).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  function partFromBarcode(raw) {
+    const s = toEnDigits(String(raw ?? "")).toUpperCase().replace(/[\r\n\t]/g, "").replace(/^[^A-Z0-9]+/, "");
+    return s.slice(0, 12).replace(/[^A-Z0-9]/g, "");
+  }
+  let nkIndex = { src: null, map: null };
+  function itemsByKey() {
+    if (nkIndex.src !== state.branchAll) {
+      const m = new Map();
+      for (const it of state.branchAll) { const k = it.nk.toUpperCase(); if (!m.has(k)) m.set(k, []); m.get(k).push(it); }
+      nkIndex = { src: state.branchAll, map: m };
+    }
+    return nkIndex.map;
+  }
+  function resolveBarcode(raw) {
+    const code = codeKey(raw), part = partFromBarcode(raw);
+    const m = itemsByKey();
+    const linked = state.links[code];
+    if (linked) { const hit = state.branchAll.filter((it) => it.n === linked); if (hit.length) return { code, part, items: hit, how: "link" }; }
+    for (const k of [part, part.slice(0, 10), code, code.slice(0, 10)]) if (k.length >= 4 && m.has(k)) return { code, part, items: m.get(k), how: "rule" };
+    for (let L = Math.min(code.length, 14); L >= 5; L--) { const k = code.slice(0, L); if (m.has(k)) return { code, part, items: m.get(k), how: "prefix" }; }
+    return { code, part, items: [], how: "none" };
+  }
+  function beep() {
+    try {
+      const A = window.AudioContext || window.webkitAudioContext; if (!A) return;
+      const ac = beep.ac ||= new A(); const o = ac.createOscillator(), g = ac.createGain();
+      o.frequency.value = 1500; g.gain.value = .12; o.connect(g); g.connect(ac.destination);
+      o.start(); o.stop(ac.currentTime + .09);
+    } catch {}
+    navigator.vibrate?.(40);
+  }
+  function handleScan(raw) {
+    if (state.screen !== "inventory" || !state.round) return;
+    const res = resolveBarcode(raw);
+    if (!res.code) return;
+    beep();
+    state.scan = { code: res.code, autoN: res.items.length === 1 ? res.items[0].n : null, at: Date.now() };
+    window.DB.note?.(`باركود ${res.code} → ${res.items.length ? res.items.map((i) => i.n).join("، ") : "ما لقيته"} (${res.how})`);
+    if (res.items.length === 1) { searchEl.value = ""; $("#search-clear").hidden = true; applyFilter(); openSheet(res.items[0]); return; }
+    // أكثر من صنف (مثلاً -01 و -02) أو ما لقيناه: نعرض البحث والموظف يختار — واختياره يعلّم التطبيق
+    searchEl.value = res.items.length ? res.items[0].nk.slice(0, 10) : res.part || res.code;
+    onSearchChange();
+    toast(res.items.length ? `فيه ${res.items.length} أصناف لهذا الباركود — اختر الصحيح وبيرتبط` : "ما لقيت الباركود — ابحث واختر الصنف الصحيح، وبيرتبط تلقائياً", 4000);
+  }
+  // ربط الباركود بالصنف (للكل)
+  function saveLink(code, n) {
+    state.links[code] = n;
+    store.set(LS_LINKS, state.links);
+    window.DB.queue({ t: "barcode", row: { code, n, by_name: me()?.name || "", deleted: false } });
+  }
+  // نافذة الجرد بعد مسح: لو الصنف غير اللي طلع تلقائياً → نعرض "ربط الباركود"
+  function scanLinkFor(it) {
+    const s = state.scan;
+    if (!s || Date.now() - s.at > 5 * 60000 || s.autoN === it.n || state.links[s.code] === it.n) return null;
+    return s.code;
+  }
+
+  // ---- الكاميرا ----
+  const SCAN_FORMATS = ["code_39", "code_128", "code_93", "codabar", "ean_13", "ean_8", "upc_a", "upc_e", "itf", "qr_code", "data_matrix", "pdf417"];
+  let cam = null;
+  function loadZXing() {
+    if (window.ZXing) return Promise.resolve();
+    return new Promise((res, rej) => { const s = document.createElement("script"); s.src = "vendor/zxing.min.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  }
+  async function openCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) { toast(window.isSecureContext ? "الجهاز ما يدعم الكاميرا" : "الكاميرا تحتاج رابط https"); return; }
+    searchEl.blur();
+    $("#scan-hint").textContent = "وجّه الكاميرا على باركود الكرتون";
+    openOverlay("scan-ov");
+    const video = $("#scan-video");
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+    } catch (e) {
+      closeOverlay("scan-ov");
+      toast(e?.name === "NotAllowedError" ? "اسمح للتطبيق باستخدام الكاميرا من إعدادات المتصفح" : "تعذّر فتح الكاميرا", 3500);
+      return;
+    }
+    if ($("#scan-ov").hidden) { stream.getTracks().forEach((t) => t.stop()); return; }   // انقفلت قبل ما تفتح
+    cam = { stream, stop: false, last: "", lastAt: 0 };
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    const track = stream.getVideoTracks()[0];
+    const caps = track.getCapabilities?.() || {};
+    $("#scan-torch").hidden = !caps.torch;
+    // نقبل القراءة لما تطلع نفس النتيجة مرتين ورا بعض (يقلل القراءات الغلط)
+    const got = (text) => {
+      if (!cam || cam.stop || !text) return;
+      const now = Date.now();
+      if (text !== cam.last || now - cam.lastAt > 1500) { cam.last = text; cam.lastAt = now; return; }
+      closeOverlay("scan-ov");
+      handleScan(text);
+    };
+    if ("BarcodeDetector" in window) {
+      let det;
+      try {
+        const sup = await window.BarcodeDetector.getSupportedFormats();
+        det = new window.BarcodeDetector({ formats: SCAN_FORMATS.filter((f) => sup.includes(f)) });
+      } catch { det = null; }
+      if (det) {
+        const loop = async () => {
+          if (!cam || cam.stop) return;
+          try { const r = await det.detect(video); if (r.length) got(r[0].rawValue); } catch {}
+          setTimeout(loop, 90);
+        };
+        loop();
+        return;
+      }
+    }
+    // آيفون وغيره: مكتبة ZXing على صور من الفيديو (منطقة الوسط بس عشان السرعة)
+    try { await loadZXing(); } catch { closeOverlay("scan-ov"); toast("تعذّر تحميل قارئ الباركود"); return; }
+    const Z = window.ZXing;
+    const hints = new Map();
+    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.CODE_93, Z.BarcodeFormat.CODABAR,
+      Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.ITF, Z.BarcodeFormat.QR_CODE, Z.BarcodeFormat.DATA_MATRIX]);
+    hints.set(Z.DecodeHintType.TRY_HARDER, true);
+    const reader = new Z.MultiFormatReader(); reader.setHints(hints);
+    const cv = document.createElement("canvas"); const ctx = cv.getContext("2d", { willReadFrequently: true });
+    const loop = () => {
+      if (!cam || cam.stop) return;
+      const w = video.videoWidth, h = video.videoHeight;
+      if (w && h) {
+        const cw = Math.round(w * 0.9), ch = Math.round(h * 0.45);
+        cv.width = cw; cv.height = ch;
+        ctx.drawImage(video, (w - cw) / 2, (h - ch) / 2, cw, ch, 0, 0, cw, ch);
+        try { got(reader.decodeWithState(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(cv)))).getText()); } catch {}
+      }
+      setTimeout(loop, 120);
+    };
+    loop();
+  }
+  function stopCamera() {
+    if (!cam) return;
+    cam.stop = true;
+    cam.stream.getTracks().forEach((t) => t.stop());
+    $("#scan-video").srcObject = null;
+    cam = null;
+  }
+  $("#cam-btn").addEventListener("click", openCamera);
+  $("#scan-close").addEventListener("click", () => closeOverlay("scan-ov"));
+  $("#scan-torch").addEventListener("click", async () => {
+    const t = cam?.stream.getVideoTracks()[0]; if (!t) return;
+    cam.torch = !cam.torch;
+    try { await t.applyConstraints({ advanced: [{ torch: cam.torch }] }); $("#scan-torch").classList.toggle("on", cam.torch); } catch {}
+  });
+
+  // ---- سكانر خارجي (يكتب مثل الكيبورد بسرعة ويضغط Enter) ----
+  const kbScan = { buf: "", t0: 0, last: 0 };
+  document.addEventListener("keydown", (e) => {
+    if (state.screen !== "inventory" || $$(".sheet-backdrop:not([hidden])").length) return;
+    const now = performance.now();
+    if (e.key === "Enter") {
+      const n = kbScan.buf.length;
+      const fast = n >= 6 && (kbScan.last - kbScan.t0) / Math.max(1, n - 1) < 45;   // أسرع من أي إنسان
+      const code = kbScan.buf; kbScan.buf = "";
+      if (!fast) return;
+      e.preventDefault(); e.stopPropagation();
+      if (document.activeElement === searchEl) { searchEl.value = ""; searchEl.blur(); }
+      handleScan(code);
+      return;
+    }
+    if (e.key.length !== 1) return;
+    if (now - kbScan.last > 100) { kbScan.buf = ""; kbScan.t0 = now; }
+    kbScan.buf += e.key; kbScan.last = now;
+  }, true);
 
   /* ---------- النوافذ المنبثقة ---------- */
   function openOverlay(id) { $("#" + id).hidden = false; }
   function closeOverlay(id) {
     if (id === "imp-backdrop" && impBusy) return;     // ما نقفل النافذة وقت الرفع
     $("#" + id).hidden = true;
+    if (id === "scan-ov") stopCamera();
     if (id === "sheet-backdrop") {
       const it = state.editing;
       state.editing = null;
@@ -905,6 +1078,9 @@
     $("#sh-note").value = c?.note || "";
     $("#sh-reset").hidden = !(c && isAdmin());
     $("#sh-verify").hidden = !rv || !c || !!c.ver;
+    const lk = scanLinkFor(it);
+    $("#sh-link").hidden = !lk;
+    if (lk) { $("#sh-link-cb").checked = true; $("#sh-link-code").textContent = `الباركود ${lk} — المرة الجاية يفتح هذا الصنف على طول`; }
     renderEntries();
     updateDiff();
     openOverlay("sheet-backdrop");
@@ -984,6 +1160,14 @@
     if (e.key === "Enter" && state.editing && e.target === cnt) { e.preventDefault(); save(); }
   });
 
+  // بعد حفظ جرد صنف جا من مسح باركود: نربط الباركود فيه لو الموظف اختاره يدوي
+  function applyScanLink(it) {
+    const s = state.scan;
+    state.scan = null;
+    if (!s || $("#sh-link").hidden || !$("#sh-link-cb").checked) return false;
+    saveLink(s.code, it.n);
+    return true;
+  }
   function save() {
     const it = state.editing; if (!it) return;
     const key = keyOf(it);
@@ -1011,10 +1195,11 @@
     // صنف من موقع ثاني انجرد هنا = صار من أصناف هذا الجرد
     if (!state.branchItems.includes(it)) state.branchItems.push(it);
     saveCounts();
+    const linked = applyScanLink(it);
     refreshRow(it);
     closeSheet();
     navigator.vibrate?.(30);
-    toast(c && v !== "" ? `✓ أُضيفت — المجموع ${fmt(state.counts[key].qty)}` : "✓ تم حفظ الجرد");
+    toast((c && v !== "" ? `✓ أُضيفت — المجموع ${fmt(state.counts[key].qty)}` : "✓ تم حفظ الجرد") + (linked ? " · وانربط الباركود" : ""));
   }
   // المراجعة: العد الثاني يصحّح المجموع (إدخال "تصحيح" بالفرق) ويأكّد الصنف
   function saveReview(it, key, c, v, loc, note) {
@@ -1037,6 +1222,7 @@
     cc.ver = { by: u?.name, u: myId(), at: now };
     pushMeta(it, cc);
     if (!state.branchItems.includes(it)) state.branchItems.push(it);
+    applyScanLink(it);
     saveCounts();
     refreshRow(it);
     closeSheet();
@@ -1140,6 +1326,10 @@
         || JSON.stringify(old.users) !== JSON.stringify(r.users)) roundsChanged = true;
     }
     if ((ch.rounds || []).length) saveRounds();
+    if ((ch.barcodes || []).length) {
+      for (const [code, n, , deleted] of ch.barcodes) { if (deleted) delete state.links[code]; else state.links[code] = n; }
+      store.set(LS_LINKS, state.links);
+    }
     for (const [id, branch, n, qty, uid, by, at, deleted, round, kind] of ch.entries) {
       if (!round) continue;
       const key = `${round}|${n}`;
@@ -2359,7 +2549,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "19";
+  const APP_VER = "20";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 
@@ -2373,7 +2563,7 @@
     setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark")));
 
   // للاختبار من وحدة التحكم
-  window.__inv = { state, parseText, matchText, makeLocTest, applyFilter, allUsers, onBack, applyChanges };
+  window.__inv = { state, parseText, matchText, makeLocTest, applyFilter, allUsers, onBack, applyChanges, resolveBarcode, handleScan };
 
   try { history.replaceState(null, "", "#" + cur); } catch {}
   if (CLOUD) {

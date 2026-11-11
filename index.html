@@ -312,10 +312,26 @@
       <textarea id="sh-note" rows="2" placeholder="اختياري"></textarea>
     </label>
 
+    <label class="check sh-link" id="sh-link" hidden>
+      <input type="checkbox" id="sh-link-cb" checked>
+      <span><strong>ربط الباركود بهذا الصنف</strong><small id="sh-link-code"></small></span>
+    </label>
+
     <div class="sheet-actions">
       <button class="btn ghost danger" id="sh-reset" hidden>حذف كل جرد الصنف</button>
     </div>
   </div>
+</div>
+
+<!-- ============ قارئ الباركود (الكاميرا) ============ -->
+<div class="sheet-backdrop scan-ov" id="scan-ov" hidden>
+  <video id="scan-video" playsinline muted autoplay></video>
+  <div class="scan-frame"><span class="scan-line"></span></div>
+  <div class="scan-top">
+    <button type="button" class="scan-btn" id="scan-close" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    <button type="button" class="scan-btn" id="scan-torch" aria-label="الفلاش" hidden><svg viewBox="0 0 24 24"><path d="M9 2h6l-1 7h4l-8 13 2-9H8z"/></svg></button>
+  </div>
+  <p class="scan-hint" id="scan-hint">وجّه الكاميرا على باركود الكرتون</p>
 </div>
 
 <!-- ============ إضافة صنف زائد ============ -->
