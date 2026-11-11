@@ -284,6 +284,7 @@
     }
     if (h === "branches") { renderRounds(); runSync(); return show("branches"); }   // نسحب آخر جرد فتحه المدير
     if (h === "admin" && u.role === "admin") { renderAdmin(); return show("admin"); }
+    if (/^ty/.test(h) && window.TY) return window.TY.route(h);        // بضاعة تويوتا (toyota.js)
     // جرد الباركود: قائمة المواقع / داخل موقع
     const mb = h.match(/^bins\/([\w-]+)$/) || h.match(/^bin\/([\w-]+)\/(.+)$/);
     if (mb) {
@@ -322,6 +323,7 @@
     if (rec) { rec.stop(); return; }
     const open = $$(".sheet-backdrop:not([hidden])");
     if (open.length) { closeOverlay(open[open.length - 1].id); return; }
+    if (/^ty/.test(state.screen) && window.TY) { window.TY.back(); return; }
     const up = { inventory: "branches", branches: "home", admin: "home", bins: "branches", bin: state.round ? "bins/" + state.round.id : "branches" }[state.screen];
     if (up) go(up);
   }
@@ -825,6 +827,7 @@
     navigator.vibrate?.(40);
   }
   function handleScan(raw) {
+    if (/^ty/.test(state.screen) && window.TY) return window.TY.scan(raw);
     if (state.screen === "bin") return binScan(raw);
     if (state.screen !== "inventory" || !state.round) return;
     const res = resolveBarcode(raw);
@@ -891,6 +894,12 @@
         $("#scan-hint").textContent = it ? `✓ ${it.n} — ${binDraft().q[it.n] || 0} حبة` : "باركود غير معروف";
         return;
       }
+      if (window.TY?.continuous()) {                  // داخل كرتون تويوتا: الكاميرا تبقى مفتوحة
+        if (now < (cam.pause || 0)) return;
+        cam.pause = now + 1300; cam.last = "";
+        $("#scan-hint").textContent = window.TY.scan(text) || "باركود غير معروف";
+        return;
+      }
       closeOverlay("scan-ov");
       handleScan(text);
     };
@@ -950,7 +959,7 @@
   // ---- سكانر خارجي (يكتب مثل الكيبورد بسرعة ويضغط Enter) ----
   const kbScan = { buf: "", t0: 0, last: 0 };
   document.addEventListener("keydown", (e) => {
-    if ((state.screen !== "inventory" && state.screen !== "bin") || $$(".sheet-backdrop:not([hidden])").length) return;
+    if (!["inventory", "bin", "tys", "tyc"].includes(state.screen) || $$(".sheet-backdrop:not([hidden])").length) return;
     const now = performance.now();
     if (e.key === "Enter") {
       const n = kbScan.buf.length;
@@ -959,6 +968,8 @@
       if (!fast) return;
       e.preventDefault(); e.stopPropagation();
       if (document.activeElement === searchEl) { searchEl.value = ""; searchEl.blur(); }
+      const ae = document.activeElement;
+      if (ae?.dataset?.scanClear != null) ae.value = "";           // خانة الكرتون بتويوتا
       handleScan(code);
       return;
     }
@@ -1692,6 +1703,7 @@
 
   /* ---------- المزامنة: نطبّق جرد الموظفين الثانيين ---------- */
   function applyChanges(ch) {
+    if (ch.ty && window.TY) { try { window.TY.apply(ch.ty); } catch (e) { console.warn("ty", e); } }
     const touched = new Set();
     let extrasChanged = false, roundsChanged = false;
     // الجولات (يفتحها ويغيّر مرحلتها المدير)
@@ -2940,7 +2952,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "22";
+  const APP_VER = "23";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 
@@ -2955,6 +2967,9 @@
 
   // للاختبار من وحدة التحكم
   window.__inv = { state, parseText, matchText, makeLocTest, applyFilter, allUsers, onBack, applyChanges, resolveBarcode, handleScan };
+  // أدوات مشتركة لقسم بضاعة تويوتا (toyota.js)
+  window.APP = { CLOUD, state, store, me, myId, isAdmin, go, show, toast, esc, fmt, norm, numKey, toEnDigits, beep, openOverlay, closeOverlay,
+    openCamera, codeKey, partFromBarcode, saveLink, loadXLSX, download, today, branchLabel, runSync, applyChanges };
 
   try { history.replaceState(null, "", "#" + cur); } catch {}
   if (CLOUD) {

@@ -86,10 +86,10 @@
       <span class="mc-text"><strong>الجرد المخزني</strong><small>جرد الأصناف حسب الفرع</small></span>
       <svg class="chev" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
-    <button class="menu-card" data-soon>
+    <button class="menu-card" data-go="ty">
       <span class="mc-icon c2"><svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
-      <span class="mc-text"><strong>بضاعة تويوتا</strong><small>متابعة بضاعة تويوتا</small></span>
-      <span class="soon">قريباً</span>
+      <span class="mc-text"><strong>بضاعة تويوتا</strong><small>جرد الكراتين ثم الأصناف داخلها</small></span>
+      <svg class="chev" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
     <button class="menu-card" data-soon>
       <span class="mc-icon c3"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span>
@@ -251,6 +251,133 @@
     </button>
     <button type="button" class="btn primary bin-close" id="bin-close">✓ قفل الموقع</button>
   </div>
+</section>
+
+<!-- ============ بضاعة تويوتا: الشحنات ============ -->
+<section id="screen-ty" class="screen">
+  <header class="topbar">
+    <span class="tb-side tb-right"><button type="button" class="mode-chip" id="ty-arch-btn" hidden>🗄 الأرشيف</button></span>
+    <span class="tb-title">بضاعة تويوتا</span>
+    <button class="tb-side tb-left back-btn" data-back="home" aria-label="رجوع">
+      رجوع
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+  </header>
+  <main class="bins-body">
+    <div class="ty-filt" id="ty-filt"></div>
+    <button class="btn primary block ty-new" id="ty-new">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> شحنة جديدة
+    </button>
+    <div id="ty-list"></div>
+    <div class="ty-admin-row" id="ty-admin-row" hidden>
+      <button class="btn ghost" id="ty-export-all">⬇ سحب Excel (المعروض)</button>
+      <button class="btn ghost" id="ty-arch-done">🗄 أرشفة المكتمل</button>
+    </div>
+  </main>
+</section>
+
+<!-- ============ بضاعة تويوتا: داخل الشحنة ============ -->
+<section id="screen-tys" class="screen">
+  <header class="topbar">
+    <span class="tb-side tb-right"><button type="button" class="mode-chip" id="tys-more" hidden>⋯ خيارات</button></span>
+    <span class="tb-title" id="tys-title">—</span>
+    <button class="tb-side tb-left back-btn" data-back="ty" aria-label="رجوع">
+      الشحنات
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+  </header>
+  <div class="ty-steps" id="tys-steps">
+    <span data-st="cartons">١ جرد الكراتين</span><span data-st="items">٢ جرد الأصناف</span><span data-st="done">✓ مكتمل</span>
+  </div>
+  <main class="bins-body">
+    <p class="ty-help" id="tys-help"></p>
+    <div class="bins-open ty-scan">
+      <input id="tys-input" data-scan-clear dir="ltr" placeholder="اضرب أو اكتب رقم الكرتون" autocapitalize="characters" autocomplete="off" enterkeyhint="go">
+      <button class="btn ghost" id="tys-go">إضافة</button>
+      <button type="button" class="cam-btn ty-cam" id="tys-cam" aria-label="الكاميرا">
+        <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+      </button>
+    </div>
+    <div class="sc-nums rp-nums" id="tys-sum"></div>
+    <div id="tys-list"></div>
+  </main>
+  <div class="bin-bar"><button type="button" class="btn primary bin-close" id="tys-main">—</button></div>
+</section>
+
+<!-- ============ بضاعة تويوتا: داخل الكرتون ============ -->
+<section id="screen-tyc" class="screen">
+  <header class="topbar">
+    <span class="tb-side tb-right"><span class="tb-label" id="tyc-sub">—</span></span>
+    <span class="tb-title bin-code" id="tyc-title" dir="ltr">—</span>
+    <button class="tb-side tb-left back-btn" id="tyc-back" aria-label="رجوع">
+      الكراتين
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+  </header>
+  <button type="button" class="ty-target" id="tyc-target" title="تعديل QTY و LINES">
+    <span id="tyc-tq"><small>QTY</small><b>0/0</b></span>
+    <span id="tyc-tl"><small>LINES</small><b>0/0</b></span>
+  </button>
+  <div class="bin-last">
+    <div class="bl-empty" id="tyc-empty">
+      <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+      <span id="tyc-empty-t">اضرب باركود الصنف — كل ضربة = حبة</span>
+    </div>
+    <div class="bl-card" id="tyc-card" hidden>
+      <div class="bl-info">
+        <span class="bl-num" id="tyc-num" dir="ltr"></span>
+        <span class="bl-name" id="tyc-name"></span>
+        <span class="bl-tag" id="tyc-tag"></span>
+      </div>
+      <div class="bl-qty">
+        <button type="button" id="tyc-minus" aria-label="نقص">−</button>
+        <button type="button" class="bl-big" id="tyc-big" title="اكتب الكمية">0</button>
+        <button type="button" id="tyc-plus" aria-label="زيادة">+</button>
+      </div>
+    </div>
+  </div>
+  <div class="bin-tools">
+    <button type="button" class="chip" id="tyc-qtymode">🔢 وضع الكمية</button>
+    <button type="button" class="chip" id="tyc-undo">↶ تراجع</button>
+    <button type="button" class="chip" id="tyc-manual">✍ إدخال يدوي</button>
+    <span class="bin-total" id="tyc-total"></span>
+  </div>
+  <div class="bin-list" id="tyc-list"></div>
+  <div class="bin-bar">
+    <button type="button" class="cam-btn" id="tyc-cam" aria-label="الكاميرا">
+      <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+    </button>
+    <button type="button" class="btn primary bin-close" id="tyc-close">✓ قفل الكرتون</button>
+  </div>
+</section>
+
+<!-- ============ بضاعة تويوتا: الأرشيف (المدير) ============ -->
+<section id="screen-tya" class="screen">
+  <header class="topbar">
+    <span class="tb-side tb-right"></span>
+    <span class="tb-title">أرشيف تويوتا</span>
+    <button class="tb-side tb-left back-btn" data-back="ty" aria-label="رجوع">
+      رجوع
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+  </header>
+  <main class="bins-body">
+    <div class="tya-form">
+      <input id="tya-q" type="search" dir="auto" placeholder="رقم كرتون، رقم صنف، أو اسم شحنة" autocomplete="off" enterkeyhint="search">
+      <div class="tya-row">
+        <label><small>من تاريخ</small><input type="date" id="tya-from"></label>
+        <label><small>إلى تاريخ</small><input type="date" id="tya-to"></label>
+        <label><small>الفرع</small><select id="tya-branch"></select></label>
+      </div>
+      <label class="tya-chk"><input type="checkbox" id="tya-all"> يشمل الشحنات الحالية (غير المؤرشفة)</label>
+      <div class="two">
+        <button class="btn primary" id="tya-search">🔍 بحث</button>
+        <button class="btn ghost" id="tya-export" disabled>⬇ Excel النتائج</button>
+      </div>
+    </div>
+    <div id="tya-sum" class="ty-help"></div>
+    <div id="tya-list"></div>
+  </main>
 </section>
 
 <!-- ============ جدول الجرد ============ -->
@@ -712,11 +839,103 @@
   </div>
 </div>
 
+<!-- ============ تويوتا: شحنة جديدة ============ -->
+<div class="sheet-backdrop" id="tyn-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="tyn-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h3 id="tyn-title">شحنة تويوتا جديدة</h3>
+      <button class="icon-btn sm" data-close="tyn-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <label class="field" id="tyn-branch-f"><span>الفرع</span><select id="tyn-branch"></select></label>
+    <label class="field"><span>اسم الشحنة <small class="muted">(اختياري)</small></span><input id="tyn-name" autocomplete="off" placeholder="مثال: شحنة الأحد"></label>
+    <button class="btn primary block" id="tyn-save">بدء جرد الكراتين ←</button>
+  </div>
+</div>
+
+<!-- ============ تويوتا: QTY و LINES للكرتون ============ -->
+<div class="sheet-backdrop" id="tyq-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="tyq-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <div><div class="sh-num" id="tyq-code" dir="ltr"></div><h3 id="tyq-title">بيانات الكرتون</h3></div>
+      <button class="icon-btn sm" data-close="tyq-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <p class="hint">من الملصق الأصفر — الاثنين إجباري</p>
+    <div class="two">
+      <label class="field"><span>QTY (عدد الحبات)</span><input id="tyq-qty" type="number" inputmode="numeric" lang="en" min="1" step="1" class="bq-input" enterkeyhint="next"></label>
+      <label class="field"><span>LINES (عدد الأصناف)</span><input id="tyq-lines" type="number" inputmode="numeric" lang="en" min="1" step="1" class="bq-input" enterkeyhint="done"></label>
+    </div>
+    <p class="ty-err" id="tyq-err" hidden></p>
+    <div class="two">
+      <button class="btn ghost danger" id="tyq-del">حذف الكرتون</button>
+      <button class="btn primary" id="tyq-save">حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ تويوتا: كمية صنف / إدخال يدوي ============ -->
+<div class="sheet-backdrop" id="tym-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="tym-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <div><div class="sh-num" id="tym-num" dir="ltr"></div><h3 id="tym-title">إدخال يدوي</h3></div>
+      <button class="icon-btn sm" data-close="tym-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div id="tym-pick">
+      <input id="tym-search" class="pk-search" dir="ltr" placeholder="رقم الصنف" autocapitalize="characters" autocomplete="off">
+      <div class="pk-list ty-pk" id="tym-list"></div>
+    </div>
+    <label class="field"><span id="tym-label">الكمية</span>
+      <input id="tym-qty" type="number" inputmode="numeric" lang="en" min="0" step="1" enterkeyhint="done" class="bq-input"></label>
+    <div class="bq-quick" id="tym-quick"></div>
+    <div class="two">
+      <button class="btn ghost danger" id="tym-remove">حذف من الكرتون</button>
+      <button class="btn primary" id="tym-save">حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ تويوتا: قفل الكرتون فيه فرق ============ -->
+<div class="sheet-backdrop" id="tyx-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="tyx-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h3 id="tyx-title">⚠ الكرتون مو مطابق</h3>
+      <button class="icon-btn sm" data-close="tyx-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div id="tyx-body"></div>
+    <div class="bc-acts">
+      <button class="btn primary block" data-close="tyx-backdrop">رجوع — أكمل الجرد</button>
+      <button class="btn ghost danger block" id="tyx-force">قفل مع الفرق (ينرفع للمدير)</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ تويوتا: خيارات الشحنة (المدير) ============ -->
+<div class="sheet-backdrop" id="tyo-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="tyo-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h3 id="tyo-title">خيارات الشحنة</h3>
+      <button class="icon-btn sm" data-close="tyo-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="data-list">
+      <button class="data-btn" id="tyo-export"><span><strong>⬇ سحب Excel</strong><small>رقم الصنف، الكمية، التاريخ، رقم الكرتون وتفاصيله</small></span></button>
+      <button class="data-btn" id="tyo-rename"><span><strong>✎ تغيير اسم الشحنة</strong></span></button>
+      <button class="data-btn" id="tyo-back"><span><strong>↩ إرجاع لجرد الكراتين</strong><small>لو نسيتوا كرتون</small></span></button>
+      <button class="data-btn" id="tyo-arch"><span><strong>🗄 أرشفة</strong><small>تختفي من الموظفين وتبقى عندك بالأرشيف للبحث</small></span></button>
+      <button class="data-btn danger" id="tyo-del"><span><strong>حذف الشحنة</strong></span></button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden></div>
 
 <script src="config.js"></script>
 <script src="vendor/supabase.js"></script>
 <script src="db.js"></script>
 <script src="app.js"></script>
+<script src="toyota.js"></script>
 </body>
 </html>

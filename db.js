@@ -234,6 +234,18 @@ window.DB = (() => {
     } else if (type === "round") {
       const m = new Map(ops.map((o) => [o.row.id, o.row]));
       await q(sb.from("rounds").upsert([...m.values()], { onConflict: "id" }));
+    } else if (type === "tyship") {
+      const m = new Map(ops.map((o) => [o.row.id, o.row]));
+      await q(sb.from("ty_ships").upsert([...m.values()], { onConflict: "id" }));
+    } else if (type === "tycarton") {
+      // دالة خاصة: الكرتون الموجود بشحنة ثانية ما ينكتب فوقه (ممنوع التكرار)
+      const m = new Map(ops.map((o) => [o.row.code, o.row]));
+      await q(sb.rpc("ty_put_cartons", { rows: [...m.values()] }));
+    } else if (type === "tyline") {
+      const m = new Map(ops.map((o) => [`${o.row.carton}|${o.row.n}`, o.row]));
+      await q(sb.from("ty_lines").upsert([...m.values()], { onConflict: "carton,n" }));
+    } else if (type === "tyarch") {
+      for (const o of ops) await q(sb.from("ty_ships").update({ archived: true, archived_at: o.row.at, archived_by: o.row.by }).eq("id", o.row.id));
     }
   }
   let flushing = null;
@@ -286,6 +298,7 @@ window.DB = (() => {
     return flushing;
   }
 
+  let tyOn = true;
   // سحب التغييرات من السيرفر (مع تداخل دقيقتين عشان ما يفوتنا شيء)
   async function pull() {
     if (!on || !profile) return null;
@@ -293,6 +306,14 @@ window.DB = (() => {
     const cur = ls.get(K.cursor, null);
     const since = cur?.server ? new Date(Date.parse(cur.server) - 120000).toISOString() : "1970-01-01T00:00:00Z";
     const ch = await q(sb.rpc("get_changes", { since }));
+    // بضاعة تويوتا (لو تحديث 7 ما انشغّل بالسيرفر نتجاهلها بدون ما نخرب الجرد)
+    if (tyOn) {
+      try { ch.ty = await q(sb.rpc("ty_changes", { since })); }
+      catch (e) {
+        if (e.code === "PGRST202" || e.status === 404) { tyOn = false; note("بضاعة تويوتا: تحديث 7 ما انشغّل بالسيرفر"); }
+        else throw e;                       // خطأ شبكة: ما نحرّك المؤشر عشان ما يفوتنا شيء
+      }
+    }
     ls.set(K.cursor, { server: ch.now, local: Date.now() });
     status.lastSync = Date.now(); status.online = true; status.okAt = Date.now();
     ch.itemsChanged = ch.items_version != null && itemsVersion != null && ch.items_version !== itemsVersion;
@@ -406,6 +427,11 @@ window.DB = (() => {
   const resetCounts = () => (on ? q(sb.rpc("admin_clear", { what: "counts" })) : Promise.resolve());
   // كل إدخالات الجولة حتى المحذوفة (للتقرير): [id, n, qty, user_id, by_name, at, deleted, deleted_by, kind, updated_at]
   const roundEntries = (rid) => (on ? q(sb.rpc("get_round_entries", { rid }), 40000) : Promise.resolve(null));
+  // بضاعة تويوتا: فحص التكرار بالسيرفر (يشمل الأرشيف)، البحث بالأرشيف، الاسترجاع
+  const tyCartonInfo = (code) => q(sb.rpc("ty_carton_info", { p_code: code }), 6000);
+  const tySearch = (p) => q(sb.rpc("ty_search", p), 60000);
+  const tyArchivedShips = () => q(sb.from("ty_ships").select("*").eq("archived", true).eq("deleted", false).order("archived_at", { ascending: false }).limit(500));
+  const tyUnarchive = (id) => q(sb.rpc("ty_unarchive", { p_id: id }));
 
   return {
     on, uuid, idb,
@@ -417,5 +443,6 @@ window.DB = (() => {
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync, pendingRounds,
     listProfiles, createUser, updateProfile, setPassword, deleteUser, normUser, loginId,
     replaceAll, upsertItems, searchCatalog, catalogSize, resetCounts, roundEntries,
+    tyCartonInfo, tySearch, tyArchivedShips, tyUnarchive,
   };
 })();
