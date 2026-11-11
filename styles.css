@@ -748,6 +748,28 @@ body.kb .bin-last { display: none; }
 #screen-bin .trow { cursor: pointer; }
 #screen-bin .trow.last { box-shadow: inset 4px 0 0 var(--primary-2); }
 #screen-bin .bin-sep { margin: 0; padding: 8px 12px 6px; background: var(--bg); border-bottom: 1px solid var(--line); }
+@media (max-width: 420px) { #inv-tb-label { display: none; } }
+.mode-chip.on { background: var(--ok); border-color: var(--ok); }
+.inv-scan-tools { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.inv-scan-tools .chip { flex: none; }
+.inv-scan-tools .chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+#screen-inventory .bin-last { padding: 6px 10px; background: var(--bg); }
+#screen-inventory .bl-card { padding: 8px 12px; }
+#screen-inventory .bl-qty .bl-big { height: 46px; font-size: 26px; }
+body.review .inv-scan-tools, body.review #il { display: none !important; }
+body.kb .inv-scan-tools { display: none; }
+.cam-btn.edit-mode { background: var(--warn); color: #fff; }
+.cam-btn.edit-mode svg { width: 22px; height: 22px; }
+#screen-bin.viewing .searchbar .search-input { opacity: .55; }
+#screen-bin.viewing .trow.done .edit-btn { background: var(--surface-2); border-color: var(--line); color: var(--ok); }
+.bc-h { margin: 12px 2px 6px; font-size: 14px; } .bc-h small { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.bc-list2 div { align-items: center; }
+.bc-list2 span { white-space: normal !important; line-height: 1.35; }
+.bc-sub { display: block; font-size: 11.5px; color: var(--muted); }
+.bc-d { font-style: normal; font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; padding: 2px 6px; border-radius: 8px; }
+.bc-d.p { color: var(--ok); background: var(--ok-bg); } .bc-d.m { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+.bc-d.o { color: #2f5fb3; background: #e8eefb; }
+[data-theme="dark"] .bc-d.o { color: #8db4f5; background: #1b2c4a; }
 .cam-btn.ok-btn { background: var(--ok); color: #fff; }
 .cam-btn.ok-btn svg { width: 26px; height: 26px; stroke-width: 3; }
 

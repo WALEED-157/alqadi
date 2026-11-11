@@ -188,7 +188,7 @@
 <!-- ============ جرد الباركود: قائمة المواقع ============ -->
 <section id="screen-bins" class="screen">
   <header class="topbar">
-    <span class="tb-side tb-right"><button type="button" class="mode-chip" id="to-normal" title="الجرد العادي">📋 عادي</button></span>
+    <span class="tb-side tb-right"><button type="button" class="mode-chip on" id="to-normal" title="اضغط عشان تشوف كل المواقع">✓ موقع موقع</button></span>
     <span class="tb-title" id="bins-title">—</span>
     <button class="tb-side tb-left back-btn" data-back="branches" aria-label="رجوع">
       رجوع
@@ -412,7 +412,7 @@
 <section id="screen-inventory" class="screen">
   <header class="topbar">
     <span class="tb-side tb-right">
-      <button type="button" class="mode-chip" id="to-scan" title="جرد بالباركود موقع موقع">⚡ باركود</button>
+      <button type="button" class="mode-chip" id="to-scan" title="اضغط عشان تجرد موقع موقع">📍 موقع موقع</button>
       <span class="tb-label" id="inv-tb-label">الجرد المخزني</span>
       <span class="loc-pin" id="loc-pin" hidden></span>
     </span>
@@ -443,6 +443,27 @@
     <button class="icon-btn xs" id="loc-btn" aria-label="نطاق المواقع" title="نطاق المواقع">
       <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
     </button>
+  </div>
+  <div class="inv-scan-tools">
+    <button type="button" class="chip" id="inv-qtymode" title="كل ضربة تفتح نافذة الكمية">🔢 وضع الكمية</button>
+    <button type="button" class="chip" id="inv-undo">↶ تراجع</button>
+    <span class="bin-total" id="inv-scan-hint">اضرب الباركود — كل ضربة = حبة</span>
+  </div>
+  <!-- آخر صنف انمسح (+ و −) -->
+  <div class="bin-last" id="il" hidden>
+    <div class="bl-card">
+      <div class="bl-info">
+        <span class="bl-num" id="il-num" dir="ltr"></span>
+        <span class="bl-name" id="il-name"></span>
+        <span class="bl-tag" id="il-tag"></span>
+      </div>
+      <div class="bl-qty">
+        <button type="button" id="il-minus" aria-label="نقص">−</button>
+        <button type="button" class="bl-big" id="il-big" title="فتح الصنف">0</button>
+        <button type="button" id="il-plus" aria-label="زيادة">+</button>
+      </div>
+      <small class="bl-sys" id="il-sys"></small>
+    </div>
   </div>
 
   <div class="table-wrap" id="table-wrap">
