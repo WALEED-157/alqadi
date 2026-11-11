@@ -1005,6 +1005,22 @@
     }
     for (const [k, c] of Object.entries(state.counts)) if (k.startsWith(r.id + "|")) for (const e of c.entries) if (e.bin && !m.has(e.bin)) m.set(e.bin, 0);
     for (const k of Object.keys(drafts)) if (k.startsWith(r.id + "|")) { const b = k.slice(r.id.length + 1); if (!m.has(b)) m.set(b, 0); }
+    // نعبّي الفراغات الصغيرة (5 رفوف أو أقل) عشان الموظف يمشي بالترتيب: A001 ← A002 (فاضي بالنظام) ← A003
+    if (!isQuick(r)) {
+      const t = roundTest(r);
+      const nums = [...m.keys()].map((b) => { const x = b.match(/^([A-Z]+[-+]?)(\d+)$/); return x && { pre: x[1], d: x[2], n: +x[2] }; })
+        .filter(Boolean).sort((a, b) => (a.pre < b.pre ? -1 : a.pre > b.pre ? 1 : a.n - b.n));
+      for (let i = 1; i < nums.length; i++) {
+        const a = nums[i - 1], b = nums[i];
+        if (a.pre !== b.pre || a.d.length !== b.d.length) continue;
+        const gap = b.n - a.n - 1;
+        if (gap < 1 || gap > 5) continue;
+        for (let k = a.n + 1; k < b.n; k++) {
+          const bin = a.pre + String(k).padStart(a.d.length, "0");
+          if (!m.has(bin) && (!t || t(bin))) m.set(bin, 0);
+        }
+      }
+    }
     return [...m.entries()].map(([bin, n]) => ({ bin, n })).sort((a, b) => binCmp(a.bin, b.bin));
   }
   // الكمية المعتمدة لكل صنف في رف (من الإدخالات)
@@ -1249,7 +1265,10 @@
     $("#bc-body").innerHTML = `<div class="sc-nums rp-nums"><div><b>${fmt(scanned.length)}</b><small>صنف انمسح</small></div><div><b>${fmt(pieces)}</b><small>حبة</small></div>
         <div class="${missing.length ? "w" : "okc"}"><b>${fmt(missing.length)}</b><small>ما انمسح</small></div><div><b>${fmt(fromOther.length)}</b><small>من موقع ثاني</small></div></div>` +
       (missing.length ? `<p class="hint">هذي بالنظام في ${esc(bin)} وما انمسحت — <b>ما تتصفّر</b>، لو لقيتوها برف ثاني تنحسب، واللي يبقى يطلع بمراجعة الفروقات:</p>
-        <div class="bc-miss">${missing.slice(0, 30).map((it) => `<div><b dir="ltr">${esc(it.n)}</b><span>${esc(it.name)}</span><small>نظام ${fmt(it.q)}</small></div>`).join("")}${missing.length > 30 ? `<p class="muted">+ ${missing.length - 30} صنف</p>` : ""}</div>` : `<p class="okc">✓ كل أصناف الموقع انمسحت</p>`);
+        <div class="bc-miss">${missing.slice(0, 30).map((it) => `<div><b dir="ltr">${esc(it.n)}</b><span>${esc(it.name)}</span><small>نظام ${fmt(it.q)}</small></div>`).join("")}${missing.length > 30 ? `<p class="muted">+ ${missing.length - 30} صنف</p>` : ""}</div>`
+        : !expected.length && !scanned.length ? `<p class="hint">الرف فاضي (ما فيه أصناف بالنظام وما انمسح شيء) — ينقفل كذا ويتسجل إنه انشاف.</p>`
+        : !expected.length ? `<p class="hint">هذا الرف ما له أصناف بالنظام — اللي انمسح فيه ينحسب على مجموع كل صنف، ومواقعها تبقى الأصلية (والرف ينكتب بالملاحظات).</p>`
+        : `<p class="okc">✓ كل أصناف الموقع انمسحت</p>`);
     const next = roundBins(r).find((b) => b.bin !== bin && !["closed", "busy"].includes(binStatus(b.bin).st) && binCmp(b.bin, bin) > 0)
       || roundBins(r).find((b) => b.bin !== bin && !["closed", "busy"].includes(binStatus(b.bin).st));
     $("#bc-next").textContent = next ? `قفل وافتح ${next.bin} ←` : "قفل — هذا آخر موقع";
@@ -2921,7 +2940,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "21";
+  const APP_VER = "22";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 
