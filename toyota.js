@@ -57,9 +57,22 @@ window.TY = (() => {
   const pushShip = (s) => queue({ t: "tyship", row: {
     id: s.id, branch: s.branch, name: s.name || "", status: s.status, by_name: s.by_name || "", created_at: iso(s.created_at),
     cartons_at: iso(s.cartons_at), done_at: iso(s.done_at), deleted: !!s.deleted } });
-  const pushCarton = (c) => queue({ t: "tycarton", row: {
+  const pushCarton = (c, release) => queue({ t: "tycarton", row: { ...(release ? { release: true } : {}),
     code: c.code, ship_id: c.ship_id, branch: c.branch, qty: c.qty, lines: c.lines, by_name: c.by_name || "", at: iso(c.at),
-    status: c.status, closed_by_name: c.closed_by || null, closed_at: iso(c.closed_at), mismatch: !!c.mismatch, deleted: !!c.deleted } });
+    status: c.status, closed_by_name: c.closed_by || null, closed_at: iso(c.closed_at), mismatch: !!c.mismatch, deleted: !!c.deleted,
+    owner: CLOUD ? c.owner || null : null, owner_name: c.owner_name || null, owner_at: iso(c.owner_at) } });
+
+  /* ---------- مين يشتغل على إيش ----------
+     - جرد الكراتين: واحد بس (اللي فتح الشحنة) + المدير
+     - جرد الأصناف: للكل، بس الكرتون اللي أخذه موظف ينقفل على الباقين
+       (كرتون أخذه وما جرد فيه شيء 15 دقيقة = يرجع حر) */
+  const FREE_AFTER = 15 * 60000;
+  const isShipOwner = (s) => A.isAdmin() || (s.u ? s.u === A.myId() : (s.by_name || "") === (me()?.name || ""));
+  function takenBy(c) {          // يرجع اسم اللي ماخذ الكرتون (غيري) أو ""
+    if (!c.owner || c.owner === A.myId() || c.status === "closed") return "";
+    if (c.status === "new" && Date.now() - (c.owner_at || 0) > FREE_AFTER) return "";
+    return c.owner_name || "موظف ثاني";
+  }
   const pushLine = (l) => queue({ t: "tyline", row: {
     carton: l.carton, n: l.n, ship_id: l.ship_id, branch: l.branch, name: l.name || "", qty: Math.max(0, l.qty), by_name: l.by_name || "",
     at: iso(l.at), deleted: !!l.deleted || l.qty <= 0 } });
@@ -72,7 +85,7 @@ window.TY = (() => {
     for (const s of ty.ships || []) {
       const loc = T.ships[s.id];
       if (recent(loc) && !s.archived && !s.deleted) continue;
-      T.ships[s.id] = { id: s.id, branch: s.branch, name: s.name, status: s.status, by_name: s.by_name, created_at: ms(s.created_at),
+      T.ships[s.id] = { id: s.id, branch: s.branch, name: s.name, status: s.status, by_name: s.by_name, u: s.user_id || loc?.u, created_at: ms(s.created_at),
         cartons_at: ms(s.cartons_at), done_at: ms(s.done_at), archived: !!s.archived, archived_at: ms(s.archived_at), archived_by: s.archived_by, deleted: !!s.deleted };
       if (CLOUD && (s.archived || s.deleted)) dropShip(s.id);
       changed = true;
@@ -82,7 +95,8 @@ window.TY = (() => {
       if (recent(loc) && loc.ship_id === c.ship_id) continue;
       if (T.ships[c.ship_id]?.archived && CLOUD) continue;
       T.cartons[c.code] = { code: c.code, ship_id: c.ship_id, branch: c.branch, qty: +c.qty || 0, lines: +c.lines || 0, by_name: c.by_name, at: ms(c.at),
-        status: c.status, closed_by: c.closed_by_name, closed_at: ms(c.closed_at), mismatch: !!c.mismatch, deleted: !!c.deleted };
+        status: c.status, closed_by: c.closed_by_name, closed_at: ms(c.closed_at), mismatch: !!c.mismatch, deleted: !!c.deleted,
+        owner: c.owner || null, owner_name: c.owner_name || "", owner_at: ms(c.owner_at) };
       changed = true;
     }
     for (const l of ty.lines || []) {
@@ -105,6 +119,7 @@ window.TY = (() => {
       else {
         const c = T.cartons[ui.carton?.code];
         if (!c || c.deleted || c.ship_id !== s.id) { A.go("tys/" + s.id); return; }
+        if (takenBy(c) && !A.isAdmin()) { toast(`الكرتون ${c.code} صار عند ${takenBy(c)}`, 3500); A.go("tys/" + s.id); return; }
         ui.carton = c; renderCarton();
       }
     }
@@ -194,14 +209,16 @@ window.TY = (() => {
     $("#tyn-branch").innerHTML = bs.map((b) => `<option value="${esc(b)}">${esc(A.branchLabel(b))}</option>`).join("");
     if (ui.branchF && bs.includes(ui.branchF)) $("#tyn-branch").value = ui.branchF;
     $("#tyn-branch-f").hidden = bs.length < 2;
-    $("#tyn-name").value = "";
+    $("#tyn-name").value = todayName();
     A.openOverlay("tyn-backdrop");
   });
+  const todayName = () => new Date().toLocaleDateString("en-GB");      // 11/11/2026
+  $("#tyn-name").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#tyn-save").click(); } });
   $("#tyn-save").addEventListener("click", () => {
     const branch = $("#tyn-branch").value;
     if (!branch) { toast("اختر الفرع"); return; }
     const now = Date.now();
-    const s = touch({ id: window.DB.uuid(), branch, name: $("#tyn-name").value.trim() || `شحنة ${new Date(now).toLocaleDateString("en-GB")}`,
+    const s = touch({ id: window.DB.uuid(), branch, name: $("#tyn-name").value.trim() || todayName(), u: A.myId(),
       status: "cartons", by_name: me()?.name || "", created_at: now, archived: false, deleted: false });
     T.ships[s.id] = s; save(); pushShip(s);
     A.closeOverlay("tyn-backdrop");
@@ -218,11 +235,16 @@ window.TY = (() => {
       const order = ["cartons", "items", "done"];
       x.className = order.indexOf(x.dataset.st) < order.indexOf(st) ? "past" : x.dataset.st === st ? "on" : "";
     });
+    const owner = isShipOwner(s);
+    const wait = st === "cartons" && !owner;          // جرد الكراتين عند واحد ثاني
+    $(".ty-scan").hidden = wait;
     $("#tys-input").placeholder = st === "cartons" ? "اضرب أو اكتب رقم الكرتون" : "اضرب باركود الكرتون لفتحه";
     $("#tys-go").textContent = st === "cartons" ? "إضافة" : "فتح";
-    $("#tys-help").innerHTML = st === "cartons"
+    $("#tys-help").innerHTML = wait
+      ? `🔒 جرد الكراتين عند <b>${esc(s.by_name || "موظف ثاني")}</b> — جرد الأصناف يفتح للكل لما يقفل جرد الكراتين.`
+      : st === "cartons"
       ? `<b>${esc(A.branchLabel(s.branch))}</b> — اضرب باركود كل كرتون (الملصق الأصفر) واكتب <b>QTY</b> و <b>LINES</b>. لما تخلص كل الكراتين اقفل جرد الكراتين.`
-      : st === "items" ? `<b>${esc(A.branchLabel(s.branch))}</b> — اضرب باركود الكرتون يفتح، وجرد الأصناف اللي داخله. الكرتون ينقفل لما يطابق QTY و LINES.`
+      : st === "items" ? `<b>${esc(A.branchLabel(s.branch))}</b> — اختر كرتون أو اضرب باركوده. الكرتون اللي تاخذه ينقفل على الباقين لين تخلصه.`
       : `الشحنة مكتملة ✓${A.isAdmin() ? " — اسحب Excel أو أرشفها من «خيارات»" : ""}`;
     $("#tys-sum").innerHTML = st === "cartons"
       ? `<div><b>${fmt(t.n)}</b><small>كرتون</small></div><div><b>${fmt(t.qty)}</b><small>QTY حبة</small></div><div><b>${fmt(t.lines)}</b><small>LINES</small></div>`
@@ -232,12 +254,17 @@ window.TY = (() => {
     const q = A.codeKey($("#tys-input").value);
     let list = cs;
     if (st !== "cartons" && q) list = list.filter((c) => c.code.includes(q));
-    const rank = (c) => (c.status === "open" ? 0 : c.status === "new" ? 1 : c.mismatch ? 2 : 3);
+    const mine = (c) => c.owner && c.owner === A.myId() && c.status !== "closed";
+    // معي أول، بعدها الحر، بعدها اللي عند غيري، بعدها المقفول
+    const rank = (c) => (c.status === "closed" ? (c.mismatch ? 3 : 4) : mine(c) ? 0 : takenBy(c) ? 2 : 1);
     list.sort(st === "cartons" ? (a, b) => (b.at || 0) - (a.at || 0) : (a, b) => rank(a) - rank(b) || a.code.localeCompare(b.code));
     $("#tys-list").innerHTML = list.length ? list.map((c) => {
       const tl = st === "cartons" ? null : tally(c);
-      const cls = c.status === "closed" ? (c.mismatch ? "bad" : "closed") : c.status === "open" ? "draft" : "left";
-      const lab = st === "cartons" ? esc(c.by_name || "") : c.status === "closed" ? (c.mismatch ? "⚠ فرق" : "✓ مطابق") : c.status === "open" ? "جاري" : "لم يبدأ";
+      const tb = st === "cartons" ? "" : takenBy(c);
+      const cls = c.status === "closed" ? (c.mismatch ? "bad" : "closed") : tb ? "busy" : mine(c) ? "draft" : "left";
+      const lab = st === "cartons" ? esc(c.by_name || "")
+        : c.status === "closed" ? (c.mismatch ? "⚠ فرق" : "✓ مطابق") + (c.closed_by ? ` · ${esc(c.closed_by)}` : "")
+        : tb ? `🔒 عند ${esc(tb)}` : mine(c) ? "معك — كمّل" : "حر";
       return `<button class="bin-row ty-crow st-${cls}" data-c="${esc(c.code)}">
         <span class="tc-main"><b dir="ltr">${esc(c.code)}</b>
         <small>QTY <b>${fmt(c.qty)}</b> · LINES <b>${fmt(c.lines)}</b>${tl && (tl.qty || c.status !== "new") ? ` — مجرود ${fmt(tl.qty)} حبة · ${fmt(tl.lines)} صنف` : ""}</small></span>
@@ -246,7 +273,8 @@ window.TY = (() => {
     // الزر الرئيسي
     const main = $("#tys-main");
     main.hidden = false; main.disabled = false; main.className = "btn primary bin-close";
-    if (st === "cartons") { main.textContent = `قفل جرد الكراتين (${fmt(t.n)}) ← جرد الأصناف`; main.disabled = !t.n; }
+    if (wait) { main.textContent = `🔒 جرد الكراتين عند ${s.by_name || "موظف ثاني"}`; main.disabled = true; }
+    else if (st === "cartons") { main.textContent = `قفل جرد الكراتين (${fmt(t.n)}) ← جرد الأصناف`; main.disabled = !t.n; }
     else if (st === "items") {
       if (t.left) { main.textContent = `باقي ${fmt(t.left)} كرتون ما انقفل`; main.disabled = true; }
       else main.textContent = "✓ إنهاء الشحنة";
@@ -266,21 +294,54 @@ window.TY = (() => {
   $("#tys-list").addEventListener("click", (e) => {
     const b = e.target.closest("[data-c]"); if (!b) return;
     const c = T.cartons[b.dataset.c]; if (!c) return;
-    if (ui.ship.status === "cartons") openCartonForm(c.code, c); else openCarton(c);
+    if (ui.ship.status === "cartons") { if (isShipOwner(ui.ship)) openCartonForm(c.code, c); else toast(`🔒 جرد الكراتين عند ${ui.ship.by_name || "موظف ثاني"}`); }
+    else takeCarton(c);
   });
+  // اسم الشحنة: يعدّله اللي فتحها أو المدير (بالضغط على العنوان)
+  $("#tys-title").addEventListener("click", () => {
+    const s = ui.ship; if (!s || !isShipOwner(s)) return;
+    const v = prompt("اسم الشحنة", s.name || ""); if (v == null || !v.trim()) return;
+    s.name = v.trim(); touch(s); save(); pushShip(s); renderShip();
+  });
+
+  // أخذ كرتون لجرد أصنافه — ينقفل على الباقين
+  async function takeCarton(c) {
+    if (c.status === "closed") { openCarton(c); return; }        // المقفول يتشاف بس
+    const mine = A.myId();
+    let tb = takenBy(c);
+    if (tb && !A.isAdmin()) { A.beep("err"); toast(`🔒 الكرتون ${c.code} مأخوذ — عند ${tb}`, 3500); return; }
+    if (tb && !confirm(`الكرتون ${c.code} عند ${tb}.\nتاخذه منه؟`)) return;
+    if (c.owner !== mine || Date.now() - (c.owner_at || 0) > 60000) {
+      if (CLOUD && navigator.onLine && window.DB.tyClaim) {
+        try {
+          const r = await window.DB.tyClaim(c.code, me()?.name || "", !!tb);
+          if (r && r.ok === false && r.exists) {
+            c.owner = r.owner; c.owner_name = r.owner_name || ""; c.owner_at = ms(r.owner_at); save();
+            A.beep("err"); toast(`🔒 الكرتون ${c.code} مأخوذ — عند ${c.owner_name || "موظف ثاني"}`, 3500);
+            if (state.screen === "tys") renderShip();
+            return;
+          }
+        } catch (e) { window.DB.note?.("حجز الكرتون ما زبط: " + e.message); }
+      }
+      c.owner = mine; c.owner_name = me()?.name || ""; c.owner_at = Date.now();
+      touch(c); save(); pushCarton(c);
+    }
+    openCarton(c);
+  }
 
   // ضربة باركود بشاشة الشحنة
   async function shipScan(raw, typed) {
     const s = ui.ship;
     const code = A.codeKey(raw);
     if (code.length < 5) { A.beep("err"); toast("رقم الكرتون قصير — تأكد منه"); return; }
+    if (s.status === "cartons" && !isShipOwner(s)) { A.beep("err"); toast(`🔒 جرد الكراتين عند ${s.by_name || "موظف ثاني"}`); return; }
     if (s.status === "cartons") return addCarton(code);
     let c = T.cartons[code];
     if (!(c && !c.deleted && c.ship_id === s.id) && typed) {
       const part = cartonsOf(s.id).filter((x) => x.code.includes(code));
       if (part.length === 1) c = part[0];
     }
-    if (c && !c.deleted && c.ship_id === s.id) { A.beep("ok"); openCarton(c); return; }
+    if (c && !c.deleted && c.ship_id === s.id) { if (!takenBy(c) || A.isAdmin()) A.beep("ok"); takeCarton(c); return; }
     A.beep("err");
     if (c && !c.deleted) { const o = T.ships[c.ship_id]; toast(`الكرتون ${code} موجود بشحنة ثانية: ${o?.name || ""} (${A.branchLabel(c.branch)})`, 4000); return; }
     toast(`الكرتون ${code} مو موجود بهالشحنة — ما انمسح بجرد الكراتين`, 4000);
@@ -434,6 +495,7 @@ window.TY = (() => {
   /* ===================== داخل الكرتون ===================== */
   function openCarton(c) {
     A.closeOverlay("scan-ov");
+    if (state.screen === "tyc" && ui.carton && ui.carton.code !== c.code) leaveCarton();
     A.go(`tyc/${c.ship_id}/${encodeURIComponent(c.code)}`);
   }
   function renderCarton() {
@@ -497,7 +559,9 @@ window.TY = (() => {
     const other = T.cartons[code];
     if (other && !other.deleted && other.ship_id === c.ship_id) {
       if (other.code === c.code) { A.beep("warn"); toast("هذا باركود الكرتون نفسه — اضرب باركود الأصناف"); return "باركود الكرتون نفسه"; }
-      A.beep("ok"); toast(`فتحنا الكرتون ${other.code}`); openCarton(other); return "";
+      A.closeOverlay("scan-ov");
+      if (takenBy(other) && !A.isAdmin()) { A.beep("err"); toast(`🔒 الكرتون ${other.code} مأخوذ — عند ${takenBy(other)}`, 3500); return ""; }
+      A.beep("ok"); toast(`فتحنا الكرتون ${other.code}`); takeCarton(other); return "";
     }
     if (c.status === "closed") { A.beep("err"); toast("الكرتون مقفول — اضغط «إعادة فتح» أول"); return "الكرتون مقفول"; }
     const r = resolveItem(raw, c.branch);
@@ -605,14 +669,24 @@ window.TY = (() => {
     if (c.status === "closed" && !A.isAdmin()) { toast("الكرتون مقفول"); return; }
     openCartonForm(c.code, c);
   });
-  $("#tyc-back").addEventListener("click", () => A.go("tys/" + ui.ship.id));
+  // طلع من الكرتون بدون ما يجرد شيء = يرجع حر للباقين
+  function leaveCarton() {
+    const c = ui.carton;
+    if (c && c.status !== "closed" && c.owner === A.myId() && !tally(c).lines) {
+      c.owner = null; c.owner_name = ""; c.owner_at = null; c.status = "new";
+      touch(c); save(); pushCarton(c, true);
+    }
+  }
+  $("#tyc-back").addEventListener("click", () => { leaveCarton(); A.go("tys/" + ui.ship.id); });
 
   // ---- قفل الكرتون: مطابق = ينقفل، فرق = تنبيه ----
   $("#tyc-close").addEventListener("click", () => {
     const c = ui.carton;
     if (c.status === "closed") {
+      if (!A.isAdmin() && c.owner && c.owner !== A.myId()) { toast(`الكرتون جرده ${c.owner_name || c.closed_by || "موظف ثاني"} — إعادة الفتح له أو للمدير`); return; }
       if (!confirm(`إعادة فتح الكرتون ${c.code} للتعديل؟`)) return;
       c.status = "open"; c.mismatch = false; c.closed_by = null; c.closed_at = null;
+      c.owner = A.myId(); c.owner_name = me()?.name || ""; c.owner_at = Date.now();
       touch(c); save(); pushCarton(c); renderCarton();
       return;
     }
@@ -805,12 +879,14 @@ window.TY = (() => {
     if ((m = h.match(/^tyc\/([\w-]+)\/(.+)$/))) {
       const s = shipOk(m[1]), c = s && T.cartons[decodeURIComponent(m[2])];
       if (!c || c.deleted || c.ship_id !== s.id) return A.go(s ? "tys/" + s.id : "ty");
+      if (takenBy(c) && !A.isAdmin()) { toast(`🔒 الكرتون ${c.code} عند ${takenBy(c)}`); return A.go("tys/" + s.id); }
       if (ui.carton?.code !== c.code) { ui.hist = []; ui.last = null; }
       ui.ship = s; ui.carton = c; renderCarton(); A.show("tyc"); return;
     }
     A.go("ty");
   }
   function back() {
+    if (state.screen === "tyc") leaveCarton();
     const up = { ty: "home", tya: "ty", tys: "ty", tyc: ui.ship ? "tys/" + ui.ship.id : "ty" }[state.screen];
     if (up) A.go(up);
   }

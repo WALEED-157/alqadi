@@ -219,12 +219,17 @@
       <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
   </header>
-  <div class="bin-last" id="bin-last">
-    <div class="bl-empty" id="bl-empty">
-      <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
-      <span>اضرب الباركود — كل ضربة = حبة</span>
+  <div class="inv-progress"><span id="bin-bar"></span></div>
+  <div class="inv-tools">
+    <div class="chips">
+      <button type="button" class="chip" id="bin-qtymode" title="كل ضربة تفتح لوحة الأرقام">🔢 وضع الكمية</button>
+      <button type="button" class="chip" id="bin-undo">↶ تراجع</button>
     </div>
-    <div class="bl-card" id="bl-card" hidden>
+    <span class="progress-text" id="bin-total"></span>
+  </div>
+  <div class="bin-last" id="bin-last" hidden>
+    <span id="bl-empty" hidden></span>
+    <div class="bl-card" id="bl-card">
       <div class="bl-info">
         <span class="bl-num" id="bl-num" dir="ltr"></span>
         <span class="bl-name" id="bl-name"></span>
@@ -238,18 +243,41 @@
       <small class="bl-sys" id="bl-sys"></small>
     </div>
   </div>
-  <div class="bin-tools">
-    <button type="button" class="chip" id="bin-qtymode" title="كل ضربة تفتح لوحة الأرقام">🔢 وضع الكمية</button>
-    <button type="button" class="chip" id="bin-undo">↶ تراجع</button>
-    <button type="button" class="chip" id="bin-search">🔍 بحث يدوي</button>
-    <span class="bin-total" id="bin-total"></span>
+  <div class="table-wrap" id="bin-wrap">
+    <div class="trow thead">
+      <span>رقم / اسم الصنف</span>
+      <span>الموقع</span>
+      <span class="c">المتوفر</span>
+      <span></span>
+    </div>
+    <div id="bin-list"></div>
+    <div class="empty" id="bin-empty" hidden>
+      <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
+      <p id="bin-empty-msg"></p>
+      <button class="btn primary sm" id="bin-empty-add" hidden>
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        إضافة كصنف زائد
+      </button>
+    </div>
   </div>
-  <div class="bin-list" id="bin-list"></div>
-  <div class="bin-bar">
-    <button type="button" class="cam-btn" id="bin-cam" aria-label="الكاميرا">
+
+  <!-- نفس شريط البحث حق الجرد العادي + زر قفل الموقع ✓ -->
+  <div class="searchbar">
+    <button type="button" class="cam-btn" id="bin-cam" aria-label="مسح باركود">
       <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>
     </button>
-    <button type="button" class="btn primary bin-close" id="bin-close">✓ قفل الموقع</button>
+    <div class="search-area">
+      <div class="search-input">
+        <svg class="s-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="bin-q" data-scan-clear type="search" inputmode="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="ابحث برقم أو اسم الصنف…">
+        <button type="button" class="clear-btn" id="bin-q-clear" aria-label="مسح" hidden>
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+    <button type="button" class="cam-btn ok-btn" id="bin-close" aria-label="قفل الموقع" title="قفل الموقع">
+      <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+    </button>
   </div>
 </section>
 
@@ -848,7 +876,8 @@
       <button class="icon-btn sm" data-close="tyn-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
     </div>
     <label class="field" id="tyn-branch-f"><span>الفرع</span><select id="tyn-branch"></select></label>
-    <label class="field"><span>اسم الشحنة <small class="muted">(اختياري)</small></span><input id="tyn-name" autocomplete="off" placeholder="مثال: شحنة الأحد"></label>
+    <label class="field"><span>اسم الشحنة <small class="muted">(تاريخ اليوم — تقدر تعدّله)</small></span><input id="tyn-name" autocomplete="off" dir="auto"></label>
+    <p class="hint">أنت اللي بتجرد الكراتين بهالشحنة — جرد الأصناف بعدها يكون للكل.</p>
     <button class="btn primary block" id="tyn-save">بدء جرد الكراتين ←</button>
   </div>
 </div>

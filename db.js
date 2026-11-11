@@ -429,6 +429,7 @@ window.DB = (() => {
   const roundEntries = (rid) => (on ? q(sb.rpc("get_round_entries", { rid }), 40000) : Promise.resolve(null));
   // بضاعة تويوتا: فحص التكرار بالسيرفر (يشمل الأرشيف)، البحث بالأرشيف، الاسترجاع
   const tyCartonInfo = (code) => q(sb.rpc("ty_carton_info", { p_code: code }), 6000);
+  const tyClaim = (code, name, force) => q(sb.rpc("ty_claim", { p_code: code, p_name: name, p_force: !!force }), 6000);
   const tySearch = (p) => q(sb.rpc("ty_search", p), 60000);
   const tyArchivedShips = () => q(sb.from("ty_ships").select("*").eq("archived", true).eq("deleted", false).order("archived_at", { ascending: false }).limit(500));
   const tyUnarchive = (id) => q(sb.rpc("ty_unarchive", { p_id: id }));
@@ -443,6 +444,6 @@ window.DB = (() => {
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync, pendingRounds,
     listProfiles, createUser, updateProfile, setPassword, deleteUser, normUser, loginId,
     replaceAll, upsertItems, searchCatalog, catalogSize, resetCounts, roundEntries,
-    tyCartonInfo, tySearch, tyArchivedShips, tyUnarchive,
+    tyCartonInfo, tyClaim, tySearch, tyArchivedShips, tyUnarchive,
   };
 })();

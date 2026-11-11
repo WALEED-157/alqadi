@@ -740,6 +740,16 @@ body.review #extra-btn { display: none; }
 .bin-bar .cam-btn { width: 56px; height: 52px; flex: none; }
 .bin-close { flex: 1; height: 52px; font-size: 17px; }
 body.kb .bin-last { display: none; }
+/* جرد الباركود بشكل الجرد العادي */
+#screen-bin { min-height: 0; overflow: hidden; }
+#screen-bin .bin-last { padding: 8px 10px 6px; background: var(--bg); }
+#screen-bin .bl-card { padding: 8px 12px; }
+#screen-bin .bl-qty .bl-big { height: 46px; font-size: 26px; }
+#screen-bin .trow { cursor: pointer; }
+#screen-bin .trow.last { box-shadow: inset 4px 0 0 var(--primary-2); }
+#screen-bin .bin-sep { margin: 0; padding: 8px 12px 6px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.cam-btn.ok-btn { background: var(--ok); color: #fff; }
+.cam-btn.ok-btn svg { width: 26px; height: 26px; stroke-width: 3; }
 
 /* الكمية / الاختيار / القفل */
 .bq-sys { margin: -6px 0 10px; font-size: 13px; }

@@ -969,7 +969,7 @@
       e.preventDefault(); e.stopPropagation();
       if (document.activeElement === searchEl) { searchEl.value = ""; searchEl.blur(); }
       const ae = document.activeElement;
-      if (ae?.dataset?.scanClear != null) ae.value = "";           // خانة الكرتون بتويوتا
+      if (ae?.dataset?.scanClear != null) { ae.value = ""; if (ae.id === "bin-q") { ae.blur(); renderBin(); } }   // خانة الكرتون بتويوتا / بحث الموقع
       handleScan(code);
       return;
     }
@@ -1098,6 +1098,7 @@
       saveDrafts();
     }
     if (state.binSt[key]?.status !== "open" || state.binSt[key]?.u !== myId()) pushBin(bin, "open");
+    $("#bin-q").value = "";
     go(`bin/${state.round.id}/${encodeURIComponent(bin)}`);
   }
   $("#bins-list").addEventListener("click", (e) => { const b = e.target.closest("[data-bin]"); if (b) openBin(b.dataset.bin); });
@@ -1127,21 +1128,44 @@
     const scanned = d.order.filter((n) => d.q[n] > 0).reverse();
     const scannedSet = new Set(scanned);
     const pieces = scanned.reduce((s, n) => s + d.q[n], 0);
-    $("#bin-total").textContent = `${fmt(scanned.length)} صنف · ${fmt(pieces)} حبة`;
+    const doneExp = expected.filter((it) => scannedSet.has(it.n)).length;
+    $("#bin-total").textContent = `${fmt(doneExp)}/${fmt(expected.length)} · ${fmt(pieces)} حبة`;
+    $("#bin-bar").style.width = expected.length ? (doneExp / expected.length) * 100 + "%" : "0";
+    // نفس سطر الجرد العادي: رقم/اسم · الموقع · المتوفر (+ جرد هذا الموقع) · زر
     const row = (it, q) => {
-      const other = binOf(it.loc) !== bin;
-      return `<div class="bin-item${q ? " on" : ""}${it.n === d.last ? " last" : ""}" data-n="${esc(it.n)}">
-        <span class="bi-t"><b dir="ltr">${esc(it.n)}</b>${it.x ? '<i class="xb">زائد</i>' : other ? `<i class="xb ob">موقعه ${esc(binOf(it.loc) || "بدون")}</i>` : ""}<small>${esc(it.name)}</small></span>
-        <span class="bi-sys">نظام <b>${fmt(it.q)}</b>${resv(it) ? `<i>محجوز ${fmt(resv(it))}</i>` : ""}</span>
-        <span class="bi-q">${q ? fmt(q) : "—"}</span></div>`;
+      const other = !it.x && binOf(it.loc) !== bin;
+      return `<div class="trow${q ? " done" : ""}${it.n === d.last ? " last" : ""}" data-n="${esc(it.n)}">
+        <span class="t-item"><span class="t-num">${esc(it.n)}${it.x ? '<i class="xb">زائد</i>' : other ? '<i class="xb ob">موقع ثاني</i>' : ""}</span><span class="t-name">${esc(it.name)}</span></span>
+        <span class="t-loc${other ? " changed" : ""}">${esc(it.loc || "—")}</span>
+        <span class="t-q"><span class="sys">${fmt(it.q)}</span>${resv(it) ? `<span class="rsv">محجوز ${fmt(resv(it))}</span>` : ""}${q ? `<span class="cnt">جرد ${fmt(q)}</span>` : ""}</span>
+        <button class="edit-btn" aria-label="تعديل">${q
+          ? '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>'
+          : '<svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'}</button>
+      </div>`;
     };
-    $("#bin-list").innerHTML =
-      scanned.map((n) => { const it = itemByN(n); return it ? row(it, d.q[n]) : ""; }).join("") +
-      (expected.some((it) => !scannedSet.has(it.n)) ? `<div class="bin-sep">بالنظام في ${esc(bin)} — ما انمسحت بعد</div>` : "") +
-      expected.filter((it) => !scannedSet.has(it.n)).map((it) => row(it, 0)).join("");
+    // البحث: نفس الجرد العادي (رقم أو اسم) من كل أصناف الفرع
+    const sq = $("#bin-q").value.trim();
+    const toks = sq ? parseText(sq) : null;
+    $("#bin-q-clear").hidden = !sq;
+    let html;
+    if (toks) {
+      const res = state.branchAll.filter((it) => matchText(it, toks)).slice(0, 80);
+      html = res.map((it) => row(it, d.q[it.n] || 0)).join("");
+      $("#bin-empty-msg").textContent = "الصنف غير موجود في مخزون الفرع";
+      $("#bin-empty-add").hidden = false;
+      $("#bin-empty").hidden = res.length > 0;
+    } else {
+      html = scanned.map((n) => { const it = itemByN(n); return it ? row(it, d.q[n]) : ""; }).join("") +
+        (expected.some((it) => !scannedSet.has(it.n)) ? `<div class="bin-sep">بالنظام في ${esc(bin)} — ما انمسحت بعد</div>` : "") +
+        expected.filter((it) => !scannedSet.has(it.n)).map((it) => row(it, 0)).join("");
+      $("#bin-empty-msg").textContent = "اضرب الباركود — كل ضربة = حبة، أو ابحث عن الصنف تحت";
+      $("#bin-empty-add").hidden = true;
+      $("#bin-empty").hidden = !!html;
+    }
+    $("#bin-list").innerHTML = html;
     // بطاقة آخر صنف
     const last = d.last && itemByN(d.last);
-    $("#bl-empty").hidden = !!last; $("#bl-card").hidden = !last;
+    $("#bin-last").hidden = !last || !!toks;
     if (last) {
       $("#bl-num").textContent = last.n; $("#bl-name").textContent = last.name;
       $("#bl-big").textContent = fmt(d.q[last.n] || 0);
@@ -1210,7 +1234,21 @@
     pick = null;
     if (binQtyMode) openBinQty(it, "add"); else binAdd(it, 1);
   }
-  $("#bin-search").addEventListener("click", () => openPick(null, [], ""));
+  // شريط البحث داخل الموقع
+  let binQT;
+  const binQ = $("#bin-q");
+  binQ.addEventListener("input", () => { clearTimeout(binQT); binQT = setTimeout(() => { if (state.screen === "bin") renderBin(); }, 120); });
+  binQ.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const toks = parseText(binQ.value.trim()); if (!toks) return;
+    const res = state.branchAll.filter((it) => matchText(it, toks));
+    if (res.length === 1) { binQ.blur(); openBinQty(res[0], "set"); }
+    else binQ.blur();
+  });
+  const binClearSearch = () => { if (binQ.value) { binQ.value = ""; renderBin(); } };
+  $("#bin-q-clear").addEventListener("click", () => { binQ.value = ""; renderBin(); binQ.focus(); });
+  $("#bin-empty-add").addEventListener("click", () => { const q = binQ.value.trim(); binClearSearch(); openExtra(q); });
 
   // ---- الكمية (للكراتين والتعديل) ----
   let bq = null;
@@ -1238,6 +1276,7 @@
     if (!Number.isFinite(v) || v < 0) { toast("كمية غير صحيحة"); return; }
     const { it, mode } = bq; bq = null;
     closeOverlay("bq-backdrop");
+    $("#bin-q").value = "";
     if (mode === "add") { if (v) binAdd(it, v); } else binSet(it, v);
   }
   $("#bq-save").addEventListener("click", saveBinQty);
@@ -2952,7 +2991,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "23";
+  const APP_VER = "24";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 
