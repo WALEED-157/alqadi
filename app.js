@@ -238,6 +238,13 @@
     state.inRound = new Set(state.branchItems);
     state.branchAll = state.data.items.filter((it) => it.b === bi && !it.gone && (!it.x || it.xr === r.id));
   }
+  // الرئيسية: التاريخ + عدد الجرد والشحنات المفتوحة على كل قسم
+  function renderHome() {
+    $("#home-date").textContent = new Date().toLocaleDateString("ar-SA-u-nu-latn-ca-gregory", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    try { $("#hn-rounds").textContent = fmt(myRounds().length); } catch { $("#hn-rounds").textContent = "—"; }
+    const ty = window.TY?.openCount?.();
+    $("#hn-ty").textContent = ty == null ? "—" : fmt(ty);
+  }
   // الجولات اللي يشوفها المستخدم
   function myRounds() {
     const u = me();
@@ -271,6 +278,7 @@
     if (h === "home") {
       $("#user-name").textContent = u.name;
       $("#admin-card").hidden = u.role !== "admin";
+      renderHome();
       return show("home");
     }
     if (!state.data) {
@@ -459,19 +467,29 @@
   }
   function renderRounds() {
     const list = myRounds();
-    $("#branch-list").innerHTML = list.length ? list.map((r) => {
-      const p = roundProgress(r);
+    const ps = list.map(roundProgress), tot = ps.reduce((s, p) => s + p.total, 0), dn = ps.reduce((s, p) => s + p.done, 0);
+    const hero = list.length ? `<div class="ty-hero">
+        <div class="th-top"><div class="th-id"><small>الجرد المخزني</small><b>${fmt(list.length)} جرد مفتوح لك</b></div>
+          <span class="th-st">${tot ? Math.round((dn / tot) * 100) : 0}%</span></div>
+        <div class="th-nums th3"><div><b>${fmt(tot)}</b><small>صنف</small></div><div><b>${fmt(dn)}</b><small>انجرد</small></div>
+          <div class="${ps.some((p) => p.diff) ? "bad" : ""}"><b>${fmt(ps.reduce((s, p) => s + p.diff, 0))}</b><small>فرق</small></div></div>
+        <div class="th-bar"><i style="width:${tot ? (dn / tot) * 100 : 0}%"></i></div></div>` : "";
+    $("#branch-list").innerHTML = hero + (list.length ? list.map((r, i) => {
+      const p = ps[i];
       const rv = r.status === "review";
-      return `<button class="branch-card round-card${rv ? " rv" : ""}" data-r="${esc(r.id)}">
-        <span class="bc-icon"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
-        <span><strong>${esc(r.name || branchLabel(r.branch))}</strong>
+      const pin = `<svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`;
+      return `<button class="ty-tile ${rv ? "tt-c" : p.pct >= 100 ? "tt-a" : "tt-i"} round-card" data-r="${esc(r.id)}">
+        <span class="tt-bg">${pin}</span>
+        <span class="tt-ico">${pin}</span>
+        <span class="tt-txt"><strong>${esc(r.name || branchLabel(r.branch))}</strong>
           <small>${esc(branchLabel(r.branch))} · <b dir="ltr">${esc(rangeText(r))}</b></small>
-          <small>${rv ? `<i class="badge b2">مراجعة الفروقات</i> باقي ${fmt(p.review)}` : `${fmt(p.total)} صنف · تم ${fmt(p.done)}`}</small></span>
-        <span class="bc-pct">${rv ? fmt(p.review) : p.pct + "%"}</span>
-        <span class="bc-bar"><span style="width:${rv ? Math.round(((p.total - p.review) / Math.max(1, p.total)) * 100) : p.pct}%"></span></span>
+          ${rv ? `<em class="tt-tag">مراجعة الفروقات</em>` : `<small>${fmt(p.total)} صنف · تم ${fmt(p.done)}${p.diff ? ` · <b class="ty-bad">فرق ${fmt(p.diff)}</b>` : ""}</small>`}</span>
+        <span class="tt-num"><b>${rv ? fmt(p.review) : p.pct + "%"}</b><small>${rv ? "باقي" : "منجز"}</small></span>
+        <span class="tt-bar"><i style="width:${rv ? Math.round(((p.total - p.review) / Math.max(1, p.total)) * 100) : p.pct}%"></i></span>
+        <svg class="tt-go" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
       </button>`;
     }).join("") : `<div class="empty"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-        <p>ما فيه جرد مفتوح لك حالياً</p><p class="muted">المدير يفتح الجرد من لوحة التحكم ← الجرد</p></div>`;
+        <p>ما فيه جرد مفتوح لك حالياً</p><p class="muted">المدير يفتح الجرد من لوحة التحكم ← الجرد</p></div>`);
     $$("#branch-list .round-card").forEach((c) => c.addEventListener("click", () => go("inv/" + c.dataset.r)));
   }
 
@@ -1178,7 +1196,9 @@
       return `<button class="bin-row st-${s.st || "left"}" data-bin="${esc(bin)}"><b dir="ltr">${esc(bin)}</b><span>${n ? fmt(n) + " صنف بالنظام" : "بدون أصناف بالنظام"}</span><i>${lab}</i></button>`;
     }).join("") : `<p class="muted pad">ما فيه مواقع بنطاق هذا الجرد — استخدم "اكتب موقع"</p>`;
     $("#bins-count").textContent = `${fmt(closed)}/${fmt(bins.length)}`;
-    $("#bins-bar").style.width = bins.length ? (closed / bins.length) * 100 + "%" : "0";
+    const bpct = bins.length ? Math.round((closed / bins.length) * 100) : 0;
+    $("#bins-bar").style.width = bpct + "%";
+    $("#bins-pct").textContent = bpct + "%";
     const nxt = bins.find((b) => binStatus(b.bin).st !== "closed" && binStatus(b.bin).st !== "busy");
     $("#bins-next").textContent = nxt ? `ابدأ من ${nxt.bin} ←` : "كل المواقع انقفلت ✓";
     $("#bins-next").disabled = !nxt;
@@ -3158,7 +3178,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "27";
+  const APP_VER = "28";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 

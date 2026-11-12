@@ -110,6 +110,7 @@ window.TY = (() => {
     save();
     if ($$(".sheet-backdrop:not([hidden])").length) return;
     const scr = state.screen;
+    if (scr === "home") { const n = openCount(); if (n != null) $("#hn-ty").textContent = fmt(n); }
     if (scr === "ty") renderList();
     else if (scr === "tys" || scr === "tyc") {
       const s = ui.ship && T.ships[ui.ship.id];
@@ -193,13 +194,16 @@ window.TY = (() => {
       const pct = done ? 100 : t.n ? Math.round((t.closed / t.n) * 100) : 0;
       const isToday = new Date(s.created_at || 0).toDateString() === today;
       const hdr = done && !doneHdr ? ((doneHdr = true), `<p class="ty-sec">✓ المكتملة${adm ? "" : " — للعرض عند المدير"}</p>`) : "";
-      return `${hdr}<button class="branch-card ty-card st-${done ? "done" : "items"}${done && !adm ? " locked" : ""}" data-s="${esc(s.id)}">
-        <span class="bc-icon">${done ? "✓" : "📦"}</span>
-        <span><strong>${esc(s.name || "شحنة")}${isToday && !done ? ` <i class="badge">اليوم</i>` : ""}</strong>
+      return `${hdr}<button class="ty-tile ${done ? "tt-a" : "tt-c"} ty-card${done && !adm ? " locked" : ""}" data-s="${esc(s.id)}">
+        <span class="tt-bg">${done ? ICO.arch : ICO.box}</span>
+        <span class="tt-ico">${done ? ICO.arch : ICO.box}</span>
+        <span class="tt-txt"><strong>${esc(s.name || "شحنة")}</strong>
           <small>${esc(A.branchLabel(s.branch))} · ${esc(dShort(s.created_at))}${s.by_name ? " · " + esc(s.by_name) : ""}</small>
-          <small><i class="badge ${done ? "b3" : "b2"}">${done ? "مكتمل" : "مفتوحة"}</i> ${fmt(t.n)} كرتون · انقفل ${fmt(t.closed)}${t.bad ? ` · <b class="ty-bad">⚠ فرق ${fmt(t.bad)}</b>` : ""}</small></span>
-        <span class="bc-pct">${done ? "✓" : pct + "%"}</span>
-        <span class="bc-bar"><span style="width:${pct}%"></span></span>
+          <small>${fmt(t.n)} كرتون · انقفل ${fmt(t.closed)}${t.bad ? ` · <b class="ty-bad">فرق ${fmt(t.bad)}</b>` : ""}</small>
+          ${isToday && !done ? `<em class="tt-tag">اليوم</em>` : done ? `<em class="tt-tag">✓ مكتملة</em>` : ""}</span>
+        <span class="tt-num"><b>${pct}%</b><small>${done ? "مكتمل" : "منجز"}</small></span>
+        <span class="tt-bar"><i style="width:${pct}%"></i></span>
+        <svg class="tt-go" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
       </button>`;
     }).join("") : `<div class="empty"><p>ما فيه شحنات حالياً</p><p class="muted">اضغط "شحنة جديدة" وابدأ بجرد الكراتين</p></div>`;
   }
@@ -968,5 +972,6 @@ window.TY = (() => {
   }
   const continuous = () => state.screen === "tyc" && !!ui.carton && !ui.qtyMode && ui.carton.status !== "closed";
 
-  return { route, back, scan, apply, continuous, _T: T, _localRows: localRows };
+  const openCount = () => (!state.data && !A.isAdmin() ? null : visibleShips().filter((s) => s.status !== "done").length);
+  return { route, back, scan, apply, continuous, openCount, _T: T, _localRows: localRows };
 })();

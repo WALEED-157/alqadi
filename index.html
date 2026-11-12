@@ -68,6 +68,7 @@
     <div class="hello">
       <small>مرحباً</small>
       <strong id="user-name">—</strong>
+      <small class="home-date" id="home-date"></small>
       <small class="sync-ind" hidden><i></i><span class="st"></span></small>
     </div>
     <div class="top-actions">
@@ -81,25 +82,30 @@
     </div>
   </header>
   <main class="home-grid">
-    <button class="menu-card" data-go="branches">
-      <span class="mc-icon c1"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12l2 2 4-4"/></svg></span>
-      <span class="mc-text"><strong>الجرد المخزني</strong><small>جرد الأصناف حسب الفرع</small></span>
-      <svg class="chev" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    <button class="ty-tile tt-i" data-go="branches">
+      <span class="tt-bg"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12l2 2 4-4"/></svg></span>
+      <span class="tt-ico"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12l2 2 4-4"/></svg></span>
+      <span class="tt-txt"><strong>الجرد المخزني</strong><small>جرد الأصناف بالباركود — موقع موقع أو كل المواقع</small></span>
+      <span class="tt-num"><b id="hn-rounds">—</b><small>جرد مفتوح</small></span>
+      <svg class="tt-go" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
-    <button class="menu-card" data-go="ty">
-      <span class="mc-icon c2"><svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
-      <span class="mc-text"><strong>بضاعة تويوتا</strong><small>جرد الكراتين ثم الأصناف داخلها</small></span>
-      <svg class="chev" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    <button class="ty-tile tt-c" data-go="ty">
+      <span class="tt-bg"><svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+      <span class="tt-ico"><svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+      <span class="tt-txt"><strong>بضاعة تويوتا</strong><small>جرد الكراتين والأصناف داخلها</small></span>
+      <span class="tt-num"><b id="hn-ty">—</b><small>شحنة مفتوحة</small></span>
+      <svg class="tt-go" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
-    <button class="menu-card" data-soon>
-      <span class="mc-icon c3"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span>
-      <span class="mc-text"><strong>عرض سعر</strong><small>إنشاء عروض الأسعار</small></span>
+    <button class="ty-tile tt-p" data-go="admin" id="admin-card" hidden>
+      <span class="tt-bg"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>
+      <span class="tt-ico"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></span>
+      <span class="tt-txt"><strong>لوحة التحكم</strong><small>الجرد، المواقع، المستخدمون، البيانات</small></span>
+      <svg class="tt-go" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <button class="ty-tile tt-g soon-tile" data-soon>
+      <span class="tt-ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span>
+      <span class="tt-txt"><strong>عرض سعر</strong><small>إنشاء عروض الأسعار</small></span>
       <span class="soon">قريباً</span>
-    </button>
-    <button class="menu-card" data-go="admin" id="admin-card" hidden>
-      <span class="mc-icon c4"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
-      <span class="mc-text"><strong>لوحة التحكم</strong><small>المستخدمون، الصلاحيات، الإحصائيات</small></span>
-      <svg class="chev" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
     <button class="home-extra" id="backup-card">
       <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
@@ -195,11 +201,14 @@
       <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
   </header>
-  <div class="inv-progress"><span id="bins-bar"></span></div>
   <main class="bins-body">
-    <div class="bins-head">
-      <div><b id="bins-count">0/0</b><small>موقع انقفل</small></div>
-      <button class="btn primary" id="bins-next">ابدأ من أول موقع باقي</button>
+    <div class="ty-hero bins-hero">
+      <div class="th-top">
+        <div class="th-id"><small>مواقع هذا الجرد</small><b><span id="bins-count">0/0</span> <small>موقع انقفل</small></b></div>
+        <span class="th-st" id="bins-pct">0%</span>
+      </div>
+      <div class="th-bar"><i id="bins-bar"></i></div>
+      <button class="hero-btn" id="bins-next">ابدأ من أول موقع باقي</button>
     </div>
     <div class="bins-open">
       <input id="bins-goto" dir="ltr" placeholder="أو اكتب موقع (مثال A150)" autocapitalize="characters" autocomplete="off" enterkeyhint="go">

@@ -908,3 +908,68 @@ body.kb .inv-scan-tools { display: none; }
 #tya-sum .chip { height: 26px; font-size: 12px; margin-inline-start: 6px; }
 @media (max-width: 420px) { .tya-row { grid-template-columns: 1fr 1fr; } .tya-row label:last-child { grid-column: 1 / -1; } }
 #tyc-title { font-size: 15px; letter-spacing: 0; }
+
+/* ===================== التصميم الموحّد ===================== */
+/* الشريط العلوي: تدرّج بدل اللون الواحد */
+.topbar { background: linear-gradient(135deg, #0f2a44 0%, #17436b 100%); box-shadow: 0 2px 12px rgba(15, 42, 68, .18); }
+[data-theme="dark"] .topbar { background: linear-gradient(135deg, #0e1d2e, #142b44); }
+
+/* الرئيسية */
+.home-top { position: relative; overflow: hidden; align-items: flex-start; padding: calc(var(--safe-t) + 16px) 18px 46px; border-radius: 0 0 28px 28px;
+  background: radial-gradient(110% 130% at 100% 0%, #2a6aa3 0%, transparent 60%), linear-gradient(150deg, #0f2a44, #1d4f7c); }
+.home-top::after { content: ""; position: absolute; width: 220px; height: 220px; border-radius: 50%; left: -70px; bottom: -120px; background: rgba(255, 255, 255, .06); }
+.hello strong { font-size: 24px; display: block; margin: 2px 0; }
+.home-date { opacity: .65 !important; font-size: 12.5px !important; }
+#screen-home .home-grid { flex: 1; display: flex; flex-direction: column; gap: 12px; margin-top: -28px; padding-bottom: calc(16px + var(--safe-b)); }
+#screen-home .ty-tile { flex: 1 1 0; max-height: 190px; }
+#screen-home .soon-tile { flex: 0 0 auto; min-height: 76px; opacity: .6; grid-template-columns: auto 1fr auto; }
+#screen-home .soon-tile .tt-ico { width: 44px; height: 44px; }
+.home-extra { background: var(--surface); }
+
+/* البطاقات الملوّنة — ألوان إضافية */
+.tt-p { --c: #5b4ccf; --cb: #ecebfd; }
+.tt-g { --c: #6b7a8c; --cb: #eef1f5; }
+[data-theme="dark"] .tt-p { --c: #b3abf5; --cb: #27234a; }
+[data-theme="dark"] .tt-g { --c: #8d9cae; --cb: #1f2c3d; }
+.ty-tile .tt-txt b[dir] { color: var(--text); font-weight: 600; }
+
+/* قوائم (الجرد / الشحنات): ارتفاع ثابت مو تعبئة */
+.branch-list { gap: 12px; }
+.branch-list .ty-tile, #ty-list .ty-tile { flex: none; min-height: 108px; margin-bottom: 0; }
+#ty-list { display: grid; gap: 12px; }
+.ty-new { height: 54px; border-radius: 16px; font-size: 16.5px; box-shadow: 0 6px 18px rgba(15, 42, 68, .2);
+  background: linear-gradient(135deg, #0f2a44, #1d4f7c); }
+[data-theme="dark"] .ty-new { background: linear-gradient(135deg, #2a6aa3, #4d8fd1); }
+
+/* قائمة المواقع */
+.bins-hero { margin-bottom: 12px; }
+.bins-hero .th-id b { font-size: 26px; margin-top: 2px; }
+.bins-hero .th-id b small { font-size: 13px; font-weight: 400; opacity: .75; }
+.bins-hero .th-bar { margin: 14px 0 12px; }
+.hero-btn { width: 100%; height: 48px; border-radius: 14px; background: #fff; color: #0f2a44; font-weight: 700; font-size: 15.5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .15); }
+.hero-btn:disabled { opacity: .6; }
+.hero-btn:active { transform: scale(.98); }
+.bins-open input { height: 46px; border-radius: 14px; background: var(--surface); }
+.bins-open .btn { height: 46px; border-radius: 14px; }
+.bin-row { --sc: var(--line); position: relative; overflow: hidden; border-radius: 14px; padding: 14px 16px 14px 12px; margin-bottom: 8px; box-shadow: var(--shadow); }
+.bin-row::before { content: ""; position: absolute; inset: 0 0 0 auto; width: 4px; background: var(--sc); }
+.bin-row.st-closed { --sc: var(--ok); } .bin-row.st-draft { --sc: var(--primary-2); } .bin-row.st-busy { --sc: var(--warn); }
+.bin-row.st-bad { --sc: var(--danger); } .bin-row.st-left { --sc: #c9d3de; }
+[data-theme="dark"] .bin-row.st-left { --sc: #33455b; }
+.bin-row b { font-size: 18px; }
+
+/* لوحة التحكم */
+.tabs { gap: 6px; padding: 10px 12px; background: var(--bg); border-bottom: 0; }
+.tabs button { height: 40px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.tabs button.active { background: linear-gradient(135deg, #0f2a44, #1d4f7c); border-color: transparent; color: #fff; }
+[data-theme="dark"] .tabs button.active { background: linear-gradient(135deg, #2a6aa3, #4d8fd1); color: #fff; }
+.data-btn { border-radius: 16px; padding: 14px; box-shadow: var(--shadow); gap: 14px; transition: transform .15s; }
+.data-btn:active { transform: scale(.985); }
+.data-btn > svg { width: 44px; height: 44px; padding: 11px; border-radius: 13px; background: #e3eefa; color: #1d6fb8; flex: none; }
+[data-theme="dark"] .data-btn > svg { background: #1b3550; color: #6aa6e2; }
+.data-btn.danger > svg { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+.sec { font-weight: 700; letter-spacing: .2px; }
+.th-nums.th3 { grid-template-columns: repeat(3, 1fr); }
+.tt-txt small b { white-space: nowrap; }
+.branch-list > .ty-hero { margin-bottom: 2px; }
