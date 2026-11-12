@@ -565,6 +565,15 @@
       <span>ملاحظات</span>
       <textarea id="sh-note" rows="2" placeholder="اختياري"></textarea>
     </label>
+    <div class="photo-row">
+      <button type="button" class="btn ghost photo-btn" id="sh-photo-btn">
+        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span id="sh-photo-t">صورة</span>
+      </button>
+      <img id="sh-photo-img" class="photo-thumb" alt="صورة الصنف" hidden>
+      <button type="button" class="photo-del" id="sh-photo-del" aria-label="حذف الصورة" hidden><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      <input type="file" id="sh-photo-in" accept="image/*" capture="environment" hidden>
+    </div>
 
     <label class="check sh-link" id="sh-link" hidden>
       <input type="checkbox" id="sh-link-cb" checked>
@@ -576,6 +585,9 @@
     </div>
   </div>
 </div>
+
+<!-- ============ عرض صورة الصنف ============ -->
+<div class="sheet-backdrop photo-ov" id="photo-ov" hidden><img id="photo-ov-img" alt="صورة الصنف"></div>
 
 <!-- ============ قارئ الباركود (الكاميرا) ============ -->
 <div class="sheet-backdrop scan-ov" id="scan-ov" hidden>
@@ -805,13 +817,39 @@
       <div><div class="sh-num" id="bq-num" dir="ltr"></div><h3 id="bq-title"></h3></div>
       <button class="icon-btn sm" data-close="bq-backdrop" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
     </div>
-    <p class="muted bq-sys" id="bq-sys"></p>
+    <div class="sh-stats">
+      <div><small>المتوفر بالنظام</small><strong id="bq-q"></strong></div>
+      <div><small>المحجوز</small><strong id="bq-r"></strong></div>
+      <div><small>موقعه بالنظام</small><strong id="bq-loc" dir="ltr"></strong></div>
+    </div>
+    <p class="note-box sh-rnote" id="bq-rnote" hidden></p>
     <label class="field"><span id="bq-label">الكمية في هذا الموقع</span>
-      <input id="bq-input" type="number" inputmode="numeric" lang="en" min="0" step="1" enterkeyhint="done" class="bq-input"></label>
-    <div class="bq-quick" id="bq-quick"></div>
-    <div class="two">
+      <div class="count-row">
+        <div class="stepper">
+          <button type="button" id="bq-plus" aria-label="زيادة">+</button>
+          <input id="bq-input" lang="en" type="number" inputmode="numeric" min="0" step="1" enterkeyhint="done">
+          <button type="button" id="bq-minus" aria-label="نقص">−</button>
+        </div>
+        <button type="button" class="btn primary save-inline" id="bq-save">
+          <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg> حفظ
+        </button>
+      </div>
+      <div class="diff" id="bq-diff"></div>
+    </label>
+    <label class="field"><span>ملاحظات</span>
+      <textarea id="bq-note" rows="2" placeholder="اختياري"></textarea>
+    </label>
+    <div class="photo-row">
+      <button type="button" class="btn ghost photo-btn" id="bq-photo-btn">
+        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span id="bq-photo-t">صورة</span>
+      </button>
+      <img id="bq-photo-img" class="photo-thumb" alt="صورة الصنف" hidden>
+      <button type="button" class="photo-del" id="bq-photo-del" aria-label="حذف الصورة" hidden><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      <input type="file" id="bq-photo-in" accept="image/*" capture="environment" hidden>
+    </div>
+    <div class="sheet-actions">
       <button class="btn ghost danger" id="bq-remove">حذف من الموقع</button>
-      <button class="btn primary" id="bq-save">حفظ</button>
     </div>
   </div>
 </div>

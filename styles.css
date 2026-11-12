@@ -973,3 +973,17 @@ body.kb .inv-scan-tools { display: none; }
 .th-nums.th3 { grid-template-columns: repeat(3, 1fr); }
 .tt-txt small b { white-space: nowrap; }
 .branch-list > .ty-hero { margin-bottom: 2px; }
+
+/* بطاقة آخر صنف: انشالت (الصف الأخير بالجدول ينعلّم بداله) */
+#bin-last, #il { display: none !important; }
+/* صورة الصنف */
+.photo-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; }
+.photo-btn { height: 44px; padding: 0 14px; gap: 8px; border-radius: 12px; }
+.photo-btn svg { width: 20px; height: 20px; }
+.photo-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 12px; border: 1px solid var(--line); cursor: zoom-in; }
+.photo-del { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--danger); background: var(--surface-2); border: 1px solid var(--line); }
+.photo-del svg { width: 16px; height: 16px; }
+.photo-ov { z-index: 300 !important; display: grid; place-items: center; background: rgba(0, 0, 0, .88) !important; padding: 16px; }
+.photo-ov[hidden] { display: none !important; }
+.photo-ov img { max-width: 100%; max-height: 90dvh; border-radius: 12px; }
+#bq-backdrop .sh-stats { margin-bottom: 10px; }

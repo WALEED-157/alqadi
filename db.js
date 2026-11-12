@@ -433,6 +433,12 @@ window.DB = (() => {
   const tySearch = (p) => q(sb.rpc("ty_search", p), 60000);
   const tyArchivedShips = () => q(sb.from("ty_ships").select("*").eq("archived", true).eq("deleted", false).order("archived_at", { ascending: false }).limit(500));
   const tyUnarchive = (id) => q(sb.rpc("ty_unarchive", { p_id: id }));
+  // صورة الصنف: ترتفع لمخزن الصور (inv-photos) وترجع رابطها
+  async function uploadPhoto(path, blob) {
+    const { error } = await sb.storage.from("inv-photos").upload(path, blob, { contentType: "image/jpeg", upsert: false });
+    if (error) throw new Error(error.message);
+    return sb.storage.from("inv-photos").getPublicUrl(path).data.publicUrl;
+  }
 
   return {
     on, uuid, idb,
@@ -444,6 +450,6 @@ window.DB = (() => {
     queue, flush, pull, sync, getStatus, onStatus: (f) => listeners.add(f), resetLocalSync, pendingRounds,
     listProfiles, createUser, updateProfile, setPassword, deleteUser, normUser, loginId,
     replaceAll, upsertItems, searchCatalog, catalogSize, resetCounts, roundEntries,
-    tyCartonInfo, tyClaim, tySearch, tyArchivedShips, tyUnarchive,
+    tyCartonInfo, tyClaim, tySearch, tyArchivedShips, tyUnarchive, uploadPhoto,
   };
 })();

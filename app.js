@@ -149,7 +149,7 @@
   }
   const pushDel = (id) => window.DB.queue({ t: "del", id });
   const pushMeta = (it, c) => window.DB.queue({ t: "meta", row: {
-    round_id: rid(), branch: bOf(it), n: it.n, loc: c?.loc ?? null, note: c?.note || null,
+    round_id: rid(), branch: bOf(it), n: it.n, loc: c?.loc ?? null, note: c?.note || null, photo: c?.photo || null,
     verified_by: c?.ver?.u ?? null, verified_name: c?.ver?.by ?? null, verified_at: c?.ver ? iso(c.ver.at) : null } });
   function pushExtra(it, rec, deleted = false) {
     window.DB.queue({ t: "extra", row: { round_id: rid(), branch: bOf(it), n: it.n, name: it.name || "", loc: it.loc || "", by_name: rec?.by || "", at: iso(rec?.at), deleted } });
@@ -1405,32 +1405,112 @@
   $("#bin-q-clear").addEventListener("click", () => { binQ.value = ""; renderBin(); binQ.focus(); });
   $("#bin-empty-add").addEventListener("click", () => { const q = binQ.value.trim(); binClearSearch(); openExtra(q); });
 
-  // ---- الكمية (للكراتين والتعديل) ----
+  /* ---- صورة الصنف (اختيارية): تنضغط وترتفع لمخزن الصور، ورابطها ينحفظ مع ملاحظات الصنف ---- */
+  const photoVal = { sh: "", bq: "" };
+  let photoBusy = false;
+  function photoSet(p, url) {
+    photoVal[p] = url || "";
+    const img = $(`#${p}-photo-img`);
+    img.hidden = !url;
+    if (url) img.src = url; else img.removeAttribute("src");
+    $(`#${p}-photo-del`).hidden = !url;
+    $(`#${p}-photo-t`).textContent = url ? "تغيير الصورة" : "صورة";
+  }
+  function shrinkPhoto(file) {
+    return new Promise((res, rej) => {
+      const img = new Image(), u = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+        const cv = document.createElement("canvas");
+        cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(u);
+        cv.toBlob((b) => (b ? res(b) : rej(new Error("ما قدرت أقرأ الصورة"))), "image/jpeg", 0.72);
+      };
+      img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("ما قدرت أقرأ الصورة")); };
+      img.src = u;
+    });
+  }
+  async function takePhoto(p, file) {
+    const it = p === "sh" ? state.editing : bq?.it;
+    if (!it || !file) return;
+    photoBusy = true;
+    $(`#${p}-photo-t`).textContent = "جاري الرفع…";
+    try {
+      const blob = await shrinkPhoto(file);
+      let url;
+      if (CLOUD) {
+        if (!navigator.onLine) throw new Error("ما فيه إنترنت");
+        url = await window.DB.uploadPhoto(`${state.round.id}/${it.n.replace(/[^\w-]/g, "_")}-${Date.now()}.jpg`, blob);
+      } else url = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+      photoSet(p, url);
+      toast("✓ الصورة جاهزة — اضغط حفظ", 2000);
+    } catch (e) { toast("الصورة ما ارتفعت: " + e.message, 3500); photoSet(p, photoVal[p]); }
+    finally { photoBusy = false; }
+  }
+  for (const p of ["sh", "bq"]) {
+    $(`#${p}-photo-btn`).addEventListener("click", () => { if (!photoBusy) $(`#${p}-photo-in`).click(); });
+    $(`#${p}-photo-in`).addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; takePhoto(p, f); });
+    $(`#${p}-photo-del`).addEventListener("click", () => { if (confirm("حذف الصورة؟")) photoSet(p, ""); });
+    $(`#${p}-photo-img`).addEventListener("click", () => { $("#photo-ov-img").src = photoVal[p]; openOverlay("photo-ov"); });
+  }
+  $("#photo-ov").addEventListener("click", () => closeOverlay("photo-ov"));
+
+  // ---- نافذة الصنف داخل الموقع (نفس شكل نافذة الجرد) ----
+  // الكمية تنكتب تلقائياً = النظام ناقص المحجوز (للصنف اللي مكانه هالرف)، والموظف يعدّلها لو فيه فرق
   let bq = null;
+  const bqMeta = (it) => binDraft().meta?.[it.n] || { note: countOf(it)?.note || "", photo: countOf(it)?.photo || "" };
   function openBinQty(it, mode) {
     if (binViewing()) { binViewBlock(); return; }
     bq = { it, mode };
-    const cur = binDraft().q[it.n] || 0;
+    const d = binDraft(), cur = d.q[it.n] || 0, has = it.n in d.q;
+    const blind = isBlind(), r = resv(it), here = !it.x && binOf(it.loc) === state.binCur;
     $("#bq-num").textContent = it.n; $("#bq-title").textContent = it.name;
-    $("#bq-sys").textContent = `النظام ${fmt(it.q)}${resv(it) ? ` · محجوز ${fmt(resv(it))}` : ""} · في ${state.binCur} الحين: ${fmt(cur)}`;
+    $("#bq-q").textContent = blind ? "—" : fmt(it.q);
+    $("#bq-r").textContent = blind ? "—" : fmt(r);
+    $("#bq-loc").textContent = it.loc || "—";
+    const rn = $("#bq-rnote");
+    rn.hidden = blind || (!r && here);
+    rn.textContent = !here ? `هذا الصنف موقعه بالنظام ${it.loc || "—"} — لقيته هنا في ${state.binCur}` : `محجوز ${fmt(r)} عند الزبون (مو بالرف) — المفروض بالرف ${fmt(it.q - r)}`;
     $("#bq-label").textContent = mode === "add" ? "كم حبة تضيف؟" : `الكمية في ${state.binCur}`;
-    $("#bq-input").value = mode === "add" ? "" : cur || "";
-    $("#bq-quick").innerHTML = [1, 5, 10, 12, 20, 24, 50, 100].map((v) => `<button type="button" data-v="${v}">${mode === "add" ? "" : "+"}${v}</button>`).join("");
+    const auto = mode !== "add" && !has && here && !blind ? Math.max(0, it.q - r) : null;
+    $("#bq-input").value = mode === "add" ? "" : has ? cur : auto ?? "";
+    bq.auto = auto != null;
+    const m = bqMeta(it);
+    $("#bq-note").value = m.note || "";
+    photoSet("bq", m.photo || "");
     $("#bq-remove").hidden = mode === "add" || !cur;
+    bqDiff();
     openOverlay("bq-backdrop");
-    setTimeout(() => $("#bq-input").focus(), 200);
+    setTimeout(() => { const i = $("#bq-input"); i.focus(); i.select?.(); }, 200);
   }
-  $("#bq-quick").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-v]"); if (!b) return;
-    const v = +b.dataset.v, i = $("#bq-input");
-    i.value = bq?.mode === "add" ? v : (+i.value || 0) + v;
-    i.focus();
-  });
+  // الفرق: مجموع الصنف بكل المواقع (بعد هالرقم) + المحجوز − النظام
+  function bqDiff() {
+    const el = $("#bq-diff");
+    if (!bq) return;
+    const { it, mode } = bq, v = $("#bq-input").value === "" ? null : +toEnDigits($("#bq-input").value);
+    const d = binDraft(), cur = d.q[it.n] || 0, had = binCommitted(state.round, state.binCur).get(it.n) || 0;
+    const here = v == null ? cur : mode === "add" ? cur + v : v;
+    const total = (countOf(it)?.qty || 0) - had + here;
+    const auto = bq.auto && v != null && v === Math.max(0, it.q - resv(it)) ? "تلقائي = النظام ناقص المحجوز · " : "";
+    if (isBlind() || v == null && !cur) { el.textContent = ""; el.className = "diff"; return; }
+    const df = total + resv(it) - it.q;
+    el.textContent = auto + (total !== here ? `بكل المواقع ${fmt(total)} · ` : "") + diffText(df);
+    el.className = "diff " + (df === 0 ? "ok" : "bad");
+  }
+  $("#bq-input").addEventListener("input", bqDiff);
+  $("#bq-plus").addEventListener("click", () => { const i = $("#bq-input"); i.value = Math.max(0, (+toEnDigits(i.value) || 0) + 1); bqDiff(); });
+  $("#bq-minus").addEventListener("click", () => { const i = $("#bq-input"); i.value = Math.max(0, (+toEnDigits(i.value) || 0) - 1); bqDiff(); });
   function saveBinQty() {
     if (!bq) return;
-    const v = +toEnDigits($("#bq-input").value);
+    if (photoBusy) { toast("لحظة — الصورة لسا ترتفع"); return; }
+    const raw = toEnDigits($("#bq-input").value).trim();
+    const v = raw === "" ? 0 : +raw;
     if (!Number.isFinite(v) || v < 0) { toast("كمية غير صحيحة"); return; }
     const { it, mode } = bq; bq = null;
+    // الملاحظة والصورة: تنحفظ بالمسودة وتطلع مع قفل الموقع
+    const note = $("#bq-note").value.trim(), photo = photoVal.bq, d = binDraft(), old = bqMeta(it);
+    if ((old.note || "") !== note || (old.photo || "") !== photo) { (d.meta ||= {})[it.n] = { note, photo }; saveDrafts(); }
     closeOverlay("bq-backdrop");
     $("#bin-q").value = "";
     if (mode === "add") { if (v) binAdd(it, v); } else binSet(it, v);
@@ -1467,7 +1547,7 @@
   function sameAsCommitted(d) {
     const had = binCommitted(state.round, state.binCur);
     const ks = Object.keys(d.q).filter((n) => d.q[n] > 0);
-    return ks.length === had.size && ks.every((n) => had.get(n) === d.q[n]);
+    return ks.length === had.size && ks.every((n) => had.get(n) === d.q[n]) && !Object.keys(d.meta || {}).length;
   }
 
   // ---- قفل الموقع ----
@@ -1530,6 +1610,13 @@
       if (!hasRealLoc(it.loc) && !c.loc) { c.loc = bin; pushMeta(it, c); }
       if (!state.branchItems.includes(it)) state.branchItems.push(it);
       n++;
+    }
+    // الملاحظات والصور اللي انكتبت داخل الموقع
+    for (const [num, m] of Object.entries(d.meta || {})) {
+      const it = itemByN(num), c = it && state.counts[keyOf(it)];
+      if (!c) continue;
+      c.note = m.note || ""; c.photo = m.photo || ""; c.metaAt = now;
+      pushMeta(it, c);
     }
     saveCounts();
     delete drafts[key]; saveDrafts();
@@ -1687,6 +1774,7 @@
     cnt.placeholder = rv ? "كم بالرف؟" : "0";
     $("#sh-loc").value = out && !c ? "" : effLoc(it) || "";
     $("#sh-note").value = c?.note || "";
+    photoSet("sh", c?.photo || "");
     $("#sh-reset").hidden = !(c && isAdmin());
     $("#sh-verify").hidden = !rv || !c || !!c.ver;
     const lk = scanLinkFor(it);
@@ -1786,7 +1874,9 @@
     const v = toEnDigits(cnt.value).trim();
     const loc = cleanLoc($("#sh-loc").value) || $("#sh-loc").value.trim();
     const note = $("#sh-note").value.trim();
-    if (state.mode === "review") return saveReview(it, key, c, v, loc, note);
+    if (photoBusy) { toast("لحظة — الصورة لسا ترتفع"); return; }
+    const photo = photoVal.sh;
+    if (state.mode === "review") return saveReview(it, key, c, v, loc, note, photo);
     const out = !it.x && !inRange(state.round, it);
     if (out && !c && v !== "" && !loc) { $("#sh-loc").focus(); toast("اكتب الموقع اللي لقيت فيه الصنف"); return; }
     if (v === "") {
@@ -1802,7 +1892,9 @@
       pushEntry(it, entry);
     }
     const cc = state.counts[key];
-    if (!c || c.loc !== it.loc || note || v === "") pushMeta(it, cc);
+    const photoChg = (cc.photo || "") !== photo;
+    cc.photo = photo;
+    if (!c || c.loc !== it.loc || note || v === "" || photoChg) pushMeta(it, cc);
     // صنف من موقع ثاني انجرد هنا = صار من أصناف هذا الجرد
     if (!state.branchItems.includes(it)) state.branchItems.push(it);
     saveCounts();
@@ -1814,7 +1906,7 @@
     toast((c && v !== "" ? `✓ أُضيفت — المجموع ${fmt(state.counts[key].qty)}` : "✓ تم حفظ الجرد") + (linked ? " · وانربط الباركود" : ""));
   }
   // المراجعة: العد الثاني يصحّح المجموع (إدخال "تصحيح" بالفرق) ويأكّد الصنف
-  function saveReview(it, key, c, v, loc, note) {
+  function saveReview(it, key, c, v, loc, note, photo) {
     const prev = c?.qty || 0;
     if (v === "" && !c) { cnt.focus(); toast("اكتب كم لقيت بالرف (ولو صفر)"); return; }
     if (v !== "" && (!Number.isFinite(+v) || +v < 0)) { cnt.focus(); toast("كمية غير صحيحة"); return; }
@@ -1830,7 +1922,7 @@
       normCount(cc);
       pushEntry(it, entry);
     }
-    cc.loc = loc; cc.note = note;
+    cc.loc = loc; cc.note = note; cc.photo = photo || "";
     cc.ver = { by: u?.name, u: myId(), at: now };
     pushMeta(it, cc);
     if (!state.branchItems.includes(it)) state.branchItems.push(it);
@@ -1970,14 +2062,14 @@
       c.entries.sort((a, b) => a.at - b.at);
       normCount(c); touched.add(key);
     }
-    for (const [branch, n, loc, note, at, round, vname, vat, vby] of ch.meta) {
+    for (const [branch, n, loc, note, at, round, vname, vat, vby, photo] of ch.meta) {
       if (!round) continue;
       const key = `${round}|${n}`;
       const c = state.counts[key];
       if (!c || (c.metaAt && c.metaAt > at)) continue;
       const ver = vat ? { by: vname, u: vby, at: +vat } : undefined;
-      if (c.loc !== (loc ?? undefined) || (c.note || "") !== (note || "") || !!c.ver !== !!ver) touched.add(key);
-      c.loc = loc ?? undefined; c.note = note || ""; c.metaAt = at; c.ver = ver;
+      if (c.loc !== (loc ?? undefined) || (c.note || "") !== (note || "") || !!c.ver !== !!ver || (c.photo || "") !== (photo || "")) touched.add(key);
+      c.loc = loc ?? undefined; c.note = note || ""; c.metaAt = at; c.ver = ver; c.photo = photo || "";
     }
     if (ch.extras.length) {
       const exs = store.get(LS_EXTRAS, {});
@@ -2131,13 +2223,13 @@
   function countRows(rows, blind) {
     const head = ["الجرد", "الفرع", "رقم الصنف", "اسم الصنف", "النوع", "الموقع بالنظام", "الموقع بعد الجرد",
       ...(blind ? [] : ["المتوفر", "المحجوز"]), "الجرد (بالرف)", ...(blind ? [] : ["الجرد النهائي (+المحجوز)", "الفرق"]),
-      "تفصيل الإدخالات", "التأكيد", "ملاحظات", "آخر جرد بواسطة", "التاريخ"];
+      "تفصيل الإدخالات", "التأكيد", "ملاحظات", "الصورة", "آخر جرد بواسطة", "التاريخ"];
     const out = rows.filter(({ it }) => !it.gone).map(({ r, it, c }) => {
       const type = it.x ? "زائد (غير موجود بالنظام)" : !inRange(r, it) ? "من موقع ثاني" : !c ? "ما انجرد" : "";
       return [roundTitle(r), branchLabel(state.data.branches[it.b]), it.n, it.name, type, it.loc, c?.loc ?? "",
         ...(blind ? [] : [it.q, it.r]), c?.qty ?? "", ...(blind ? [] : [c ? finalOf(it, c) : "", c ? diffOf(it, c) : ""]),
         c ? c.entries.map((e) => `${e.kind === "fix" && e.qty > 0 ? "+" : ""}${e.qty} (${e.kind === "fix" ? "تصحيح " : ""}${e.by || ""})`).join(" ، ") : "",
-        c?.ver ? `${c.ver.by || ""} ${dt(c.ver.at)}` : "", [c?.note, extraBinsNote(it, c)].filter(Boolean).join(" · "), c?.by ?? "", c ? dt(c.at) : ""];
+        c?.ver ? `${c.ver.by || ""} ${dt(c.ver.at)}` : "", [c?.note, extraBinsNote(it, c)].filter(Boolean).join(" · "), /^https?:/.test(c?.photo || "") ? c.photo : "", c?.by ?? "", c ? dt(c.at) : ""];
     });
     return [head, ...out];
   }
@@ -3178,7 +3270,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "28";
+  const APP_VER = "29";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 
