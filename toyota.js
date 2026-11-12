@@ -240,12 +240,17 @@ window.TY = (() => {
      ١) جرد الكراتين — للي فتح الشحنة + المدير، ويقدر يضيف كراتين بأي وقت (لو اكتشف كراتين نسيها)
      ٢) جرد الأصناف — للكل: الكراتين اللي ما انقفلت
      ٣) الأرشيف — الكراتين اللي انقفلت (للعرض، وإعادة الفتح لصاحبها أو المدير) */
-  const VIEWS = { c: "📦 جرد الكراتين", i: "🔎 جرد الأصناف", a: "🗄 أرشيف الكراتين" };
+  const VIEWS = { c: "جرد الكراتين", i: "جرد الأصناف", a: "أرشيف الكراتين" };
+  const ICO = {
+    box: `<svg viewBox="0 0 24 24"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8M7.5 5.5l9 5"/></svg>`,
+    scan: `<svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>`,
+    arch: `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/></svg>`,
+  };
   function renderShip() {
     const s = ui.ship, t = shipStats(s), v = ui.view || "", done = s.status === "done";
     const cs = cartonsOf(s.id), owner = isShipOwner(s);
     const hub = !v;
-    $("#tys-title").textContent = hub ? s.name || A.branchLabel(s.branch) : VIEWS[v];
+    $("#tys-title").textContent = hub ? "الشحنة" : VIEWS[v];
     $("#tys-back-t").textContent = hub ? "الشحنات" : "الشحنة";
     $("#tys-more").hidden = !A.isAdmin() || !hub;
     $("#tys-hub").hidden = !hub;
@@ -256,24 +261,46 @@ window.TY = (() => {
     if (hub) {
       const myOpen = cs.filter((c) => c.status !== "closed" && c.owner === A.myId() && !takenBy(c)).length;
       const free = cs.filter((c) => c.status !== "closed" && !takenBy(c)).length;
+      const pct = t.n ? Math.round((t.closed / t.n) * 100) : 0;
+      const lock = !owner && !done;
+      const tile = (v, ico, title, num, unit, lines, tag, bar) => `
+        <button class="ty-tile tt-${v}" data-v="${v}">
+          <span class="tt-bg">${ico}</span>
+          <span class="tt-ico">${ico}</span>
+          <span class="tt-txt"><strong>${title}</strong>${lines.map((x) => `<small>${x}</small>`).join("")}${tag ? `<em class="tt-tag">${tag}</em>` : ""}</span>
+          <span class="tt-num"><b>${fmt(num)}</b><small>${unit}</small></span>
+          ${bar != null ? `<span class="tt-bar"><i style="width:${bar}%"></i></span>` : ""}
+          <svg class="tt-go" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>`;
       $("#tys-hub").innerHTML = `
-        <p class="ty-help"><b>${esc(s.name || "")}</b> · ${esc(A.branchLabel(s.branch))} · ${esc(dShort(s.created_at))}${s.by_name ? " · فتحها " + esc(s.by_name) : ""}${done ? " · <b>✓ مكتملة</b>" : ""}</p>
-        <button class="branch-card ty-hub-card" data-v="c"><span class="bc-icon">📦</span>
-          <span><strong>١ جرد الكراتين</strong><small>${fmt(t.n)} كرتون · QTY ${fmt(t.qty)} · LINES ${fmt(t.lines)}</small>
-          <small>${owner ? (done ? "للعرض" : "تقدر تضيف كراتين بأي وقت") : `🔒 عند ${esc(s.by_name || "موظف ثاني")} — للعرض`}</small></span>
-          <span class="bc-pct">${fmt(t.n)}</span></button>
-        <button class="branch-card ty-hub-card" data-v="i"><span class="bc-icon">🔎</span>
-          <span><strong>٢ جرد الأصناف</strong><small>باقي ${fmt(t.left)} كرتون${t.open ? ` · جاري ${fmt(t.open)}` : ""}${myOpen ? ` · <b>معك ${fmt(myOpen)}</b>` : ""}</small>
-          <small>${t.left ? `${fmt(free)} حر تقدر تاخذه` : t.n ? "كل الكراتين انقفلت ✓" : "لسا ما انضاف كراتين"}</small></span>
-          <span class="bc-pct">${fmt(t.left)}</span></button>
-        <button class="branch-card ty-hub-card" data-v="a"><span class="bc-icon">🗄</span>
-          <span><strong>٣ الأرشيف</strong><small>${fmt(t.closed)} كرتون انقفل · مطابق ${fmt(t.closed - t.bad)}${t.bad ? ` · <b class="ty-bad">⚠ فرق ${fmt(t.bad)}</b>` : ""}</small>
-          <small>الكراتين المقفولة — للعرض</small></span>
-          <span class="bc-pct">${fmt(t.closed)}</span></button>`;
+        <div class="ty-hero${done ? " done" : ""}">
+          <div class="th-top">
+            <div class="th-id"><b>${esc(s.name || "شحنة")}</b>
+              <small>${esc(A.branchLabel(s.branch))} · ${esc(dShort(s.created_at))}${s.by_name ? " · " + esc(s.by_name) : ""}</small></div>
+            <span class="th-st">${done ? "✓ مكتملة" : "مفتوحة"}</span>
+          </div>
+          <div class="th-nums">
+            <div><b>${fmt(t.n)}</b><small>كرتون</small></div>
+            <div><b>${fmt(t.qty)}</b><small>حبة QTY</small></div>
+            <div><b>${fmt(t.closed - t.bad)}</b><small>مطابق</small></div>
+            <div class="${t.bad ? "bad" : ""}"><b>${fmt(t.bad)}</b><small>فرق</small></div>
+          </div>
+          <div class="th-bar"><i style="width:${pct}%"></i></div>
+          <small class="th-pct">${t.n ? `انقفل ${fmt(t.closed)} من ${fmt(t.n)} كرتون · ${pct}%` : "لسا ما انضاف كراتين"}</small>
+        </div>
+        ${tile("c", ICO.box, "جرد الكراتين", t.n, "كرتون",
+          [`QTY ${fmt(t.qty)} · LINES ${fmt(t.lines)}`],
+          lock ? `🔒 عند ${esc(s.by_name || "موظف ثاني")} — للعرض` : done ? "للعرض" : "تقدر تضيف كراتين بأي وقت")}
+        ${tile("i", ICO.scan, "جرد الأصناف", t.left, "باقي",
+          [t.left ? `${fmt(free)} حر تقدر تاخذه${t.open ? ` · جاري ${fmt(t.open)}` : ""}` : t.n ? "كل الكراتين انقفلت ✓" : "لسا ما انضاف كراتين"],
+          myOpen ? `معك ${fmt(myOpen)} — كمّل` : "", pct)}
+        ${tile("a", ICO.arch, "الأرشيف", t.closed, "مقفول",
+          [`مطابق ${fmt(t.closed - t.bad)}${t.bad ? ` · <b class="ty-bad">فرق ${fmt(t.bad)}</b>` : ""}`],
+          "الكراتين المقفولة — للعرض")}`;
       main.hidden = false;
       if (done) { main.hidden = !A.isAdmin(); main.textContent = "⬇ سحب Excel"; }
       else if (!owner) { main.hidden = true; }
-      else if (!t.n) { main.textContent = "✓ إنهاء الشحنة"; main.disabled = true; }
+      else if (!t.n) { main.hidden = true; }
       else if (t.left) { main.textContent = `باقي ${fmt(t.left)} كرتون ما انقفل`; main.disabled = true; }
       else main.textContent = "✓ إنهاء الشحنة";
       return;
@@ -319,7 +346,10 @@ window.TY = (() => {
   }
 
   $("#tys-input").addEventListener("input", () => { if (ui.view && ui.view !== "c") renderShip(); });
-  $("#tys-hub").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (b) A.go(`tys/${ui.ship.id}/${b.dataset.v}`); });
+  $("#tys-hub").addEventListener("click", (e) => {
+    if (e.target.closest(".th-id b")) { $("#tys-title").click(); return; }          // اسم الشحنة = تعديل الاسم
+    const b = e.target.closest("[data-v]"); if (b) A.go(`tys/${ui.ship.id}/${b.dataset.v}`);
+  });
   $("#tys-back").addEventListener("click", back);
   $("#tys-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#tys-go").click(); } });
   $("#tys-go").addEventListener("click", () => {
