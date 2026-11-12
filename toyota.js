@@ -219,8 +219,9 @@ window.TY = (() => {
   // شحنة جديدة
   $("#ty-new").addEventListener("click", () => {
     const bs = myBranches();
-    $("#tyn-branch").innerHTML = bs.map((b) => `<option value="${esc(b)}">${esc(A.branchLabel(b))}</option>`).join("");
-    if (ui.branchF && bs.includes(ui.branchF)) $("#tyn-branch").value = ui.branchF;
+    // الفرع إلزامي: ما فيه افتراضي (إلا لو له فرع واحد بس)
+    $("#tyn-branch").innerHTML = (bs.length > 1 ? `<option value="" selected disabled>— اختر الفرع —</option>` : "") +
+      bs.map((b) => `<option value="${esc(b)}">${esc(A.branchLabel(b))}</option>`).join("");
     $("#tyn-branch-f").hidden = bs.length < 2;
     $("#tyn-name").value = todayName();
     A.openOverlay("tyn-backdrop");
@@ -229,7 +230,7 @@ window.TY = (() => {
   $("#tyn-name").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#tyn-save").click(); } });
   $("#tyn-save").addEventListener("click", () => {
     const branch = $("#tyn-branch").value;
-    if (!branch) { toast("اختر الفرع"); return; }
+    if (!branch) { toast("⚠ اختر الفرع أولاً"); $("#tyn-branch").focus(); return; }
     const now = Date.now();
     const s = touch({ id: window.DB.uuid(), branch, name: $("#tyn-name").value.trim() || todayName(), u: A.myId(),
       status: "cartons", by_name: me()?.name || "", created_at: now, archived: false, deleted: false });
@@ -296,7 +297,7 @@ window.TY = (() => {
           [`QTY ${fmt(t.qty)} · LINES ${fmt(t.lines)}`],
           lock ? `🔒 عند ${esc(s.by_name || "موظف ثاني")} — للعرض` : done ? "للعرض" : "تقدر تضيف كراتين بأي وقت")}
         ${tile("i", ICO.scan, "جرد الأصناف", t.left, "باقي",
-          [t.left ? `${fmt(free)} حر تقدر تاخذه${t.open ? ` · جاري ${fmt(t.open)}` : ""}` : t.n ? "كل الكراتين انقفلت ✓" : "لسا ما انضاف كراتين"],
+          [t.left ? `${fmt(free)} حر تقدر تاخذه${t.open ? ` · جاري ${fmt(t.open)}` : ""}` : t.n ? "✓ تم جرد جميع الكراتين" : "لسا ما انضاف كراتين"],
           myOpen ? `معك ${fmt(myOpen)} — كمّل` : "", pct)}
         ${tile("a", ICO.arch, "الأرشيف", t.closed, "مقفول",
           [`مطابق ${fmt(t.closed - t.bad)}${t.bad ? ` · <b class="ty-bad">فرق ${fmt(t.bad)}</b>` : ""}`],
@@ -345,7 +346,7 @@ window.TY = (() => {
         <small>QTY <b>${fmt(c.qty)}</b> · LINES <b>${fmt(c.lines)}</b>${tl && (tl.qty || c.status !== "new") ? ` — مجرود ${fmt(tl.qty)} حبة · ${fmt(tl.lines)} صنف` : ""}</small></span>
         <i>${lab}</i></button>`;
     }).join("") : `<p class="muted pad">${q && v !== "c" ? "ما فيه كرتون بهالرقم"
-      : v === "c" ? "ما انمسح ولا كرتون — اضرب أول باركود" : v === "i" ? (t.n ? "كل الكراتين انقفلت ✓ — تلقاها بالأرشيف" : "لسا ما انضاف كراتين") : "ما انقفل ولا كرتون للحين"}</p>`;
+      : v === "c" ? "ما انمسح ولا كرتون — اضرب أول باركود" : v === "i" ? (t.n ? "✓ تم جرد جميع الكراتين — تجدها في الأرشيف" : "لسا ما انضاف كراتين") : "ما انقفل ولا كرتون للحين"}</p>`;
     main.hidden = true;
   }
 
@@ -785,7 +786,7 @@ window.TY = (() => {
     A.beep(mismatch ? "warn" : "ok");
     navigator.vibrate?.(30);
     const left = shipStats(s).left;
-    toast(`${mismatch ? "⚠ انقفل الكرتون مع الفرق" : "✓ مطابق — انقفل الكرتون"}${left ? ` · باقي ${left} كرتون` : " · كل الكراتين انقفلت ✓"}`, 3000);
+    toast(`${mismatch ? "⚠ تم إغلاق الكرتون مع وجود فرق" : "✓ مطابق — تم إغلاق الكرتون"}${left ? ` · المتبقي ${left} كرتون` : " · تم جرد جميع الكراتين ✓"}`, 3000);
     A.go(shipUrl());
   }
 

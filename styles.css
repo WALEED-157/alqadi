@@ -987,3 +987,35 @@ body.kb .inv-scan-tools { display: none; }
 .photo-ov[hidden] { display: none !important; }
 .photo-ov img { max-width: 100%; max-height: 90dvh; border-radius: 12px; }
 #bq-backdrop .sh-stats { margin-bottom: 10px; }
+
+/* ===== v30: الإشعارات + أقسام المواقع للمدير ===== */
+.bell-btn { position: relative; }
+.bell-btn .bell-n { position: absolute; top: -4px; left: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font: 700 11px/18px system-ui, sans-serif; font-style: normal; text-align: center; box-shadow: 0 0 0 2px var(--surface); }
+.bell-btn.ring svg { animation: bellRing 2.4s ease-in-out infinite; transform-origin: 50% 10%; }
+@keyframes bellRing { 0%, 70%, 100% { transform: rotate(0); } 75% { transform: rotate(14deg); } 82% { transform: rotate(-12deg); } 89% { transform: rotate(7deg); } 95% { transform: rotate(-4deg); } }
+#screen-admin .tb-right { align-items: center; gap: 6px; }
+#screen-admin .bell-btn { width: 38px; height: 38px; background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.18); color: #fff; }
+.nt-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; padding-bottom: 8px; }
+.nt-row { display: grid; grid-template-columns: 34px 1fr 18px; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); text-align: right; width: 100%; color: inherit; }
+.nt-row.new { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
+.nt-row.new .nt-t b::after { content: "جديد"; margin-inline-start: 6px; font-size: 10px; padding: 1px 6px; border-radius: 6px; background: var(--danger); color: #fff; vertical-align: middle; }
+.nt-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--ok) 15%, transparent); font-size: 16px; }
+.nt-t { display: flex; flex-direction: column; min-width: 0; } .nt-t small { color: var(--muted); font-size: 12px; }
+.nt-row .chev { width: 18px; height: 18px; stroke: var(--muted); fill: none; stroke-width: 2; }
+
+.lv-seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+.lv-seg button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.lv-seg button b { font-size: 18px; color: var(--text, inherit); }
+.lv-seg button.on { color: #fff; border-color: transparent; box-shadow: var(--shadow); }
+.lv-seg button.on b { color: #fff; }
+.lv-seg .lv-prog.on { background: var(--warn); } .lv-seg .lv-done.on { background: var(--primary); }
+.lv-seg .lv-appr.on { background: var(--ok); } .lv-seg .lv-map.on { background: #5b6b7f; }
+.bb-list #bb-all { margin-bottom: 10px; }
+.bb-row { --sc: var(--line); position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 6px; padding: 12px 16px 12px 12px; margin-bottom: 8px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.bb-row::before { content: ""; position: absolute; inset: 0 0 0 auto; width: 5px; background: var(--sc); }
+.bb-prog { --sc: var(--warn); } .bb-done { --sc: var(--primary); } .bb-appr { --sc: var(--ok); }
+.bb-row.hi { outline: 2px solid var(--primary); animation: bbHi 1.2s ease 2; }
+@keyframes bbHi { 50% { background: color-mix(in srgb, var(--primary) 14%, var(--surface)); } }
+.bb-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; } .bb-top b { font-size: 18px; } .bb-top span { color: var(--muted); font-size: 13px; }
+.bb-nums { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; } .bb-nums b { font-size: 15px; }
+.bin-row.appr { --sc: var(--ok); } .bin-row.appr i { font-weight: 700; }

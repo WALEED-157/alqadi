@@ -244,6 +244,7 @@
     try { $("#hn-rounds").textContent = fmt(myRounds().length); } catch { $("#hn-rounds").textContent = "—"; }
     const ty = window.TY?.openCount?.();
     $("#hn-ty").textContent = ty == null ? "—" : fmt(ty);
+    try { updateBell(); } catch {}
   }
   // الجولات اللي يشوفها المستخدم
   function myRounds() {
@@ -292,7 +293,7 @@
       if (state.data) $("#toast").hidden = true;
     }
     if (h === "branches") { renderRounds(); runSync(); return show("branches"); }   // نسحب آخر جرد فتحه المدير
-    if (h === "admin" && u.role === "admin") { renderAdmin(); return show("admin"); }
+    if (h === "admin" && u.role === "admin") { renderAdmin(); try { updateBell(); } catch {} return show("admin"); }
     if (/^ty/.test(h) && window.TY) return window.TY.route(h);        // بضاعة تويوتا (toyota.js)
     // جرد الباركود: قائمة المواقع / داخل موقع
     const mb = h.match(/^bins\/([\w-]+)$/) || h.match(/^bin\/([\w-]+)\/(.+)$/);
@@ -333,7 +334,8 @@
     const open = $$(".sheet-backdrop:not([hidden])");
     if (open.length) { closeOverlay(open[open.length - 1].id); return; }
     if (/^ty/.test(state.screen) && window.TY) { window.TY.back(); return; }
-    const up = { inventory: "branches", branches: "home", admin: "home", bins: "branches", bin: state.round ? "bins/" + state.round.id : "branches" }[state.screen];
+    if (state.screen === "bin" && state.round) { binLeave(); return; }
+    const up = { inventory: "branches", branches: "home", admin: "home", bins: "branches", bin: "branches" }[state.screen];
     if (up) go(up);
   }
 
@@ -1109,12 +1111,18 @@
   const binKey = (bin) => `${state.round.id}|${bin}`;
   const binDraft = () => (drafts[binKey(state.binCur)] ||= { q: {}, order: [], hist: [], last: null });
   // موقع مقفول وما ضغط "تعديل" = عرض بس (ما يصير مسودة)
-  const binViewing = () => !!state.round && !drafts[binKey(state.binCur)] && state.binSt[binKey(state.binCur)]?.status === "closed";
+  const binApproved = (bin = state.binCur) => state.binSt[binKey(bin)]?.status === "approved";
+  // المعتمد = عرض بس للموظف دائماً (حتى لو عنده مسودة قديمة بجواله)
+  const binViewing = () => !!state.round && ((binApproved() && !isAdmin()) ||
+    (!drafts[binKey(state.binCur)] && ["closed", "approved"].includes(state.binSt[binKey(state.binCur)]?.status)));
   function binViewData() {
     const had = binCommitted(state.round, state.binCur);
     return { q: Object.fromEntries(had), order: [...had.keys()], hist: [], last: null };
   }
-  function binViewBlock() { beep("err"); toast("الموقع مقفول ✓ — اضغط ✎ تعديل لو تبي تغيّر فيه"); }
+  function binViewBlock() {
+    beep("err");
+    toast(binApproved() && !isAdmin() ? "🔒 الموقع معتمد من الإدارة — التعديل للمدير فقط" : "✓ تم جرد هذا الموقع — اضغط ✎ تعديل لو تبي تغيّر فيه");
+  }
   // نفس إعداد الجولة بدون شاشة القائمة
   function enterRound(r) {
     if (state.round?.id !== r.id) { state.status = "todo"; state.pins = []; }
@@ -1168,17 +1176,24 @@
     const others = [...m.entries()].filter(([b, q]) => q && b !== orig && b !== c.loc);
     return others.length ? `مواقع إضافية: ${others.map(([b, q]) => `${b} (${q})`).join("، ")}` : "";
   }
-  const binStatus = (bin) => {
-    const s = state.binSt[binKey(bin)];
+  // حالات الموقع: open (قيد الجرد) · closed (تم الجرد) · approved (اعتمده المدير — مقفل) · none (رجع غير مجرود)
+  const binStatus = (bin, r = state.round) => {
+    const k = `${r.id}|${bin}`, s = state.binSt[k];
     const fresh = s && Date.now() - (s.at || 0) < 3 * 3600000;      // الفتح يعتبر منتهي بعد 3 ساعات (جوال طفى مثلاً)
+    if (s?.status === "approved") return { st: "closed", appr: true, by: s.by, at: s.at };
     if (s?.status === "closed") return { st: "closed", by: s.by, at: s.at };
-    if (drafts[binKey(bin)] && Object.keys(drafts[binKey(bin)].q).length) return { st: "draft" };
-    if (s?.status === "open" && fresh && s.u !== myId()) return { st: "busy", by: s.by };
+    if (drafts[k] && Object.keys(drafts[k].q).length) return { st: "draft", by: me()?.name };
+    if (s?.status === "open" && s.u !== myId()) return { st: fresh ? "busy" : "idle", by: s.by };
     return { st: "" };
   };
-  function pushBin(bin, status) {
-    const row = { round_id: state.round.id, bin, status, by_name: me()?.name || "" };
-    state.binSt[binKey(bin)] = { status, u: myId(), by: row.by_name, at: Date.now() };
+  const binLabel = (s) => ({
+    closed: s.appr ? `🔒 معتمد${s.by ? " · " + esc(s.by) : ""}` : `✓ تم الجرد${s.by ? " · " + esc(s.by) : ""}`,
+    draft: `✎ مسودة · ${esc(s.by || "")}`, busy: `⏳ قيد الجرد · ${esc(s.by || "موظف")}`, idle: `✎ بدأه ${esc(s.by || "موظف")}`, "": "",
+  })[s.st];
+  // by: الاعتماد يحتفظ باسم اللي جرد الموقع
+  function pushBin(bin, status, r = state.round, by = me()?.name || "") {
+    const row = { round_id: r.id, bin, status, by_name: by };
+    state.binSt[`${r.id}|${bin}`] = { status, u: myId(), by: row.by_name, at: Date.now() };
     store.set(LS_BINST, state.binSt);
     window.DB.queue({ t: "bin", row });
   }
@@ -1192,23 +1207,23 @@
     $("#bins-list").innerHTML = bins.length ? bins.map(({ bin, n }) => {
       const s = binStatus(bin);
       if (s.st === "closed") closed++;
-      const lab = { closed: `✓ انقفل${s.by ? " · " + esc(s.by) : ""}`, draft: "✎ مسودة — ما انقفل", busy: `مفتوح عند ${esc(s.by || "موظف")}`, "": "" }[s.st];
-      return `<button class="bin-row st-${s.st || "left"}" data-bin="${esc(bin)}"><b dir="ltr">${esc(bin)}</b><span>${n ? fmt(n) + " صنف بالنظام" : "بدون أصناف بالنظام"}</span><i>${lab}</i></button>`;
+      return `<button class="bin-row st-${s.st === "idle" ? "draft" : s.st || "left"}${s.appr ? " appr" : ""}" data-bin="${esc(bin)}"><b dir="ltr">${esc(bin)}</b><span>${n ? fmt(n) + " صنف بالنظام" : "بدون أصناف بالنظام"}</span><i>${binLabel(s)}</i></button>`;
     }).join("") : `<p class="muted pad">ما فيه مواقع بنطاق هذا الجرد — استخدم "اكتب موقع"</p>`;
     $("#bins-count").textContent = `${fmt(closed)}/${fmt(bins.length)}`;
     const bpct = bins.length ? Math.round((closed / bins.length) * 100) : 0;
     $("#bins-bar").style.width = bpct + "%";
     $("#bins-pct").textContent = bpct + "%";
     const nxt = bins.find((b) => binStatus(b.bin).st !== "closed" && binStatus(b.bin).st !== "busy");
-    $("#bins-next").textContent = nxt ? `ابدأ من ${nxt.bin} ←` : "كل المواقع انقفلت ✓";
+    $("#bins-next").textContent = nxt ? `ابدأ من ${nxt.bin} ←` : bins.length ? "✓ تم جرد جميع المواقع" : "لا توجد مواقع";
     $("#bins-next").disabled = !nxt;
   }
   function openBin(bin) {
     bin = cleanLoc(bin);
     if (!bin) return;
     const s = binStatus(bin);
-    if (s.st === "busy" && !confirm(`الموقع ${bin} مفتوح عند ${s.by || "موظف ثاني"}.\nتفتحه أنت بعد؟ (ممكن ينجرد مرتين)`)) return;
+    if (s.st === "busy" && !confirm(`الموقع ${bin} قيد الجرد عند ${s.by || "موظف آخر"}.\nتفتحه أنت أيضاً؟ (ممكن ينجرد مرتين)`)) return;
     const key = binKey(bin);
+    if (s.appr && !isAdmin() && drafts[key]) { delete drafts[key]; saveDrafts(); }    // مسودة قديمة على موقع اعتمده المدير
     // رف مقفول: يفتح عرض بس — المسودة تنسوّى لما يضغط "تعديل"
     if (s.st !== "closed") {
       if (!drafts[key]) {
@@ -1224,12 +1239,14 @@
   // تعديل موقع مقفول
   function binEdit() {
     const bin = state.binCur, key = binKey(bin);
+    if (binApproved(bin) && !isAdmin()) { binViewBlock(); return; }
+    const was = state.binSt[key];
     const had = binCommitted(state.round, bin);
-    drafts[key] = { q: Object.fromEntries(had), order: [...had.keys()], hist: [], last: null, wasClosed: true };
+    drafts[key] = { q: Object.fromEntries(had), order: [...had.keys()], hist: [], last: null, wasClosed: true, wasSt: was?.status, wasBy: was?.by };
     saveDrafts();
     pushBin(bin, "open");
     renderBin();
-    toast(`✎ ${bin} مفتوح للتعديل — اقفله ✓ لما تخلص`);
+    toast(`✎ ${bin} مفتوح للتعديل — اضغط ✓ لما تخلص`);
   }
   $("#bins-list").addEventListener("click", (e) => { const b = e.target.closest("[data-bin]"); if (b) openBin(b.dataset.bin); });
   $("#bins-next").addEventListener("click", () => {
@@ -1254,12 +1271,13 @@
     const r = state.round, bin = state.binCur, d = view ? binViewData() : binDraft();
     const expected = roundItemsOf(r).filter((it) => !it.x && binOf(it.loc) === bin);
     $("#bin-title").textContent = bin;
-    $("#bin-sub").textContent = view ? "✓ مقفول" : `${fmt(expected.length)} صنف بالنظام`;
+    $("#bin-sub").textContent = view ? (binApproved() ? "🔒 معتمد" : "✓ تم الجرد") : `${fmt(expected.length)} صنف بالنظام`;
     $("#screen-bin").classList.toggle("viewing", view);
     const cb = $("#bin-close");
     cb.classList.toggle("ok-btn", !view);
     cb.classList.toggle("edit-mode", view);
-    cb.title = view ? "تعديل الموقع" : "قفل الموقع";
+    cb.title = view ? "تعديل الموقع" : "إنهاء جرد الموقع";
+    cb.hidden = view && binApproved() && !isAdmin();
     cb.innerHTML = view
       ? '<svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'
       : '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>';
@@ -1539,9 +1557,15 @@
   function binLeave() {
     if (!binViewing()) {
       const key = binKey(state.binCur), d = drafts[key];
-      if (d?.wasClosed && sameAsCommitted(d)) { delete drafts[key]; saveDrafts(); pushBin(state.binCur, "closed"); }
-      else if (d && Object.keys(d.q).length) toast("المسودة محفوظة — ترجع تكمل هذا الموقع بأي وقت", 2500);
+      if (d?.wasClosed && sameAsCommitted(d)) { delete drafts[key]; saveDrafts(); pushBin(state.binCur, d.wasSt || "closed", state.round, d.wasBy || me()?.name || ""); }
+      else if (d && Object.keys(d.q).length) toast("✎ المسودة محفوظة باسمك — تقدر تكمل هذا الموقع بأي وقت", 2500);
+      else if (d && !d.wasClosed && !binCommitted(state.round, state.binCur).size && !Object.keys(d.meta || {}).length) {
+        // فتح الموقع وطلع بدون ما يجرد شيء: يرجع غير مجرود (ما يطلع "قيد الجرد" باسمه)
+        delete drafts[key]; saveDrafts();
+        if (state.binSt[key]?.status === "open" && state.binSt[key].by === me()?.name) pushBin(state.binCur, "none");
+      }
     }
+    if (state.binFromAdmin) { state.binFromAdmin = false; go("admin"); return; }
     go("bins/" + state.round.id);
   }
   function sameAsCommitted(d) {
@@ -1620,21 +1644,27 @@
     }
     saveCounts();
     delete drafts[key]; saveDrafts();
-    pushBin(bin, "closed");
+    // المدير يعدّل موقع: يبقى باسم اللي جرده، والمعتمد يبقى معتمد
+    const adm = isAdmin() && d.wasClosed;
+    pushBin(bin, adm && d.wasSt === "approved" ? "approved" : "closed", r, adm && d.wasBy ? d.wasBy : me()?.name || "");
     return n;
   }
   $("#bc-next").addEventListener("click", () => {
     const next = $("#bc-next").dataset.next;
     commitBin(); closeOverlay("bc-backdrop");
     navigator.vibrate?.(30);
-    if (next) { toast(`✓ انقفل ${state.binCur} — فتحنا ${next}`); openBin(next); }
-    else { toast(`✓ انقفل ${state.binCur}`); go("bins/" + state.round.id); }
+    if (next) { toast(`✓ تم جرد الموقع ${state.binCur} — التالي ${next}`); openBin(next); }
+    else { toast(`✓ تم جرد الموقع ${state.binCur}`); binDone(); }
   });
   $("#bc-list").addEventListener("click", () => {
     commitBin(); closeOverlay("bc-backdrop");
-    toast(`✓ انقفل ${state.binCur}`);
-    go("bins/" + state.round.id);
+    toast(`✓ تم جرد الموقع ${state.binCur}`);
+    binDone();
   });
+  function binDone() {
+    if (state.binFromAdmin) { state.binFromAdmin = false; go("admin"); return; }
+    go("bins/" + state.round.id);
+  }
 
   /* ---------- النوافذ المنبثقة ---------- */
   function openOverlay(id) { $("#" + id).hidden = false; }
@@ -2042,7 +2072,11 @@
       if (cur && cur.at > at && cur.u === myId()) continue;          // تغييري المحلي أحدث
       state.binSt[k] = { status, u: uid, by, at: +at }; binsChanged = true;
     }
-    if (binsChanged) store.set(LS_BINST, state.binSt);
+    if (binsChanged) {
+      store.set(LS_BINST, state.binSt);
+      notifyBins();
+      if (state.screen === "admin" && adminTab === "locs") renderAdmin(true);
+    }
     for (const [id, branch, n, qty, uid, by, at, deleted, round, kind, bin] of ch.entries) {
       if (!round) continue;
       const key = `${round}|${n}`;
@@ -2401,7 +2435,9 @@
     const bs = state.data.branches;
     if (!bs.length) { toast("ارفع المخزون أول من تبويب البيانات"); return; }
     $("#rd-title").textContent = r ? "تعديل الجرد" : "فتح جرد جديد";
-    $("#rd-branch").innerHTML = bs.map((b) => `<option value="${esc(b)}"${(r ? r.branch : state.lastRoundBranch || bs[0]) === b ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("");
+    // الفرع إلزامي بالجرد الجديد: ما فيه افتراضي
+    $("#rd-branch").innerHTML = (r ? "" : `<option value="" selected disabled>— اختر الفرع —</option>`) +
+      bs.map((b) => `<option value="${esc(b)}"${r?.branch === b ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("");
     $("#rd-branch").disabled = !!r;
     $("#rd-from").value = r?.loc_from || ""; $("#rd-to").value = r?.loc_to || "";
     $("#rd-name").value = r?.name || "";
@@ -2417,6 +2453,7 @@
     if (CLOUD && !state.profiles) loadProfiles().then(() => { if (!$("#round-backdrop").hidden && editingRound === r) openRoundForm(r); });
   }
   function renderRoundPrefixes() {
+    if (!$("#rd-branch").value) { $("#rd-prefixes").innerHTML = `<p class="muted">اختر الفرع أولاً</p>`; $("#rd-preview").innerHTML = `<span class="w">⚠ اختر الفرع</span>`; return; }
     $("#rd-prefixes").innerHTML = shelfChips(locGroups(branchItemsOf($("#rd-branch").value))) || `<p class="muted">لا توجد مواقع</p>`;
     updateRoundPreview();
   }
@@ -2431,7 +2468,7 @@
       (overlap.length ? `<br><span class="w">⚠️ يتداخل مع جرد مفتوح: ${overlap.map(esc).join("، ")}</span>` : "");
   }
   $("#rd-branch").addEventListener("change", () => { state.lastRoundBranch = $("#rd-branch").value; renderRoundPrefixes(); });
-  ["#rd-from", "#rd-to"].forEach((s) => $(s).addEventListener("input", updateRoundPreview));
+  ["#rd-from", "#rd-to"].forEach((s) => $(s).addEventListener("input", () => { if ($("#rd-branch").value) updateRoundPreview(); }));
   $("#rd-prefixes").addEventListener("click", (e) => {
     const b = e.target.closest(".lp"); if (!b) return;
     $("#rd-from").value = b.dataset.from; $("#rd-to").value = b.dataset.to;
@@ -2439,7 +2476,7 @@
   });
   $("#rd-save").addEventListener("click", () => {
     const from = cleanLoc($("#rd-from").value), to = cleanLoc($("#rd-to").value);
-    if (!editingRound && !$("#rd-branch").value) { toast("اختر الفرع"); return; }
+    if (!editingRound && !$("#rd-branch").value) { toast("⚠ اختر الفرع أولاً"); $("#rd-branch").focus(); return; }
     const users = $$("#rd-users input:checked").map((i) => i.value);
     const fields = { loc_from: from, loc_to: to, name: $("#rd-name").value.trim(), users };
     if (!from && !to && !confirm("ما حددت مواقع — يعني جرد الفرع كامل. متأكد؟")) return;
@@ -2456,15 +2493,18 @@
   const QK_OPS_TXT = { starts: "يبدأ بـ", contains: "يحتوي", eq: "يساوي", notcontains: "لا يحتوي", notstarts: "لا يبدأ بـ" };
   const QK_OPS_NUM = { gt: "أكبر من", lt: "أقل من", eq: "يساوي" };
   const qk = { branch: null, sel: new Set(), filters: [], round: null, list: [] };
+  let qkPreBranch = null;
   function openQuick(r) {
     const bs = state.data.branches;
     if (!bs.length) { toast("ارفع المخزون أول من تبويب البيانات"); return; }
     qk.round = r;
-    qk.branch = r ? r.branch : state.lastRoundBranch || bs[0];
+    qk.branch = r ? r.branch : qkPreBranch || "";      // الفرع إلزامي: ما فيه افتراضي
+    qkPreBranch = null;
     qk.sel = new Set(r?.items || []);
     qk.filters = [{ f: "name", op: "contains", v: "" }];
     $("#qk-title").textContent = r ? "تعديل الجرد السريع" : "جرد سريع — اختيار الأصناف";
-    $("#qk-branch").innerHTML = bs.map((b) => `<option value="${esc(b)}"${b === qk.branch ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("");
+    $("#qk-branch").innerHTML = (qk.branch ? "" : `<option value="" selected disabled>— اختر الفرع —</option>`) +
+      bs.map((b) => `<option value="${esc(b)}"${b === qk.branch ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("");
     $("#qk-branch").disabled = !!r;
     $("#qk-name").value = r?.name || "";
     $("#qk-only").checked = !!r;
@@ -2522,7 +2562,7 @@
       shown.map((it) => `<tr data-n="${esc(it.n)}" class="${qk.sel.has(it.n) ? "on" : ""}"><td><input type="checkbox"${qk.sel.has(it.n) ? " checked" : ""}></td>
         <td dir="ltr">${esc(it.n)}</td><td>${esc(it.name)}</td><td dir="ltr">${esc(it.loc || "—")}</td><td>${fmt(it.q)}</td></tr>`).join("") +
       `</tbody></table>${qk.list.length > shown.length ? `<p class="hint pad">يعرض أول 300 — "تحديد كل النتائج" يحدد الـ ${fmt(qk.list.length)} كلها</p>` : ""}`
-      : `<p class="muted pad">ما فيه نتائج</p>`;
+      : `<p class="muted pad">${qk.branch ? "ما فيه نتائج" : "⚠ اختر الفرع أولاً"}</p>`;
     $("#qk-save").textContent = qk.round ? `حفظ التعديل (${fmt(qk.sel.size)} صنف)` : `إنشاء الجرد السريع (${fmt(qk.sel.size)} صنف)`;
   }
   let qkT;
@@ -2549,7 +2589,7 @@
     renderQkFilters();
     $$("#qk-filters .qf-v").at(-1)?.focus();
   });
-  $("#qk-branch").addEventListener("change", () => { qk.branch = $("#qk-branch").value; state.lastRoundBranch = qk.branch; qk.sel.clear(); applyQk(); });
+  $("#qk-branch").addEventListener("change", () => { qk.branch = $("#qk-branch").value; qk.sel.clear(); applyQk(); });
   $("#qk-only").addEventListener("change", applyQk);
   $("#qk-all").addEventListener("click", () => {
     if (qk.list.length > 3000 && !confirm(`تحديد ${fmt(qk.list.length)} صنف؟`)) return;
@@ -2736,9 +2776,173 @@
     toast(`✓ ${fmt(done.length)} صنف مجرود · ${fmt(todo.length)} ما انجرد`, 3000);
   }
 
+  /* ---- لوحة التحكم ← المواقع: قيد الجرد / تم جردها (بانتظار الاعتماد) / معتمدة ----
+     المدير يقدر: يعرض ويعدّل أي موقع، يعتمده (يتقفل على الموظفين)، يرجعه، أو يحذف جرده */
+  let locsView = "done", locsHi = null;
+  const LV = { prog: "قيد الجرد", done: "تم جردها", appr: "معتمدة", map: "خريطة الفرع" };
+  const ago = (t) => {
+    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    return m < 1 ? "الآن" : m < 60 ? `قبل ${m} د` : m < 1440 ? `قبل ${Math.round(m / 60)} س` : hm(t);
+  };
+  function binBoard() {
+    const out = { prog: [], done: [], appr: [] }, exp = new Map();
+    for (const [k, s] of Object.entries(state.binSt)) {
+      const i = k.indexOf("|"), r = state.rounds[k.slice(0, i)], bin = k.slice(i + 1);
+      if (!r || r.deleted || r.status === "closed") continue;
+      const sec = { open: "prog", closed: "done", approved: "appr" }[s.status];
+      if (!sec) continue;
+      // أصناف الموقع بالنظام لكل جولة (نحسبها مرة وحدة)
+      if (!exp.has(r.id)) {
+        const m = new Map();
+        for (const it of roundItemsOf(r)) { if (it.x || !inRange(r, it)) continue; const b = binOf(it.loc); if (b) (m.get(b) || m.set(b, []).get(b)).push(it); }
+        exp.set(r.id, m);
+      }
+      const its = exp.get(r.id).get(bin) || [], had = binCommitted(r, bin);
+      const done = its.filter((it) => had.has(it.n)).length;
+      const diff = its.filter((it) => { const c = countIn(r, it); return (c ? c.qty : 0) + resv(it) - it.q !== 0; }).length;
+      const pcs = [...had.values()].reduce((a, b) => a + b, 0);
+      out[sec].push({ k, r, bin, s, exp: its.length, done, diff, pcs, n: had.size, stale: sec === "prog" && Date.now() - (s.at || 0) > 3 * 3600000 });
+    }
+    for (const l of Object.values(out)) l.sort((a, b) => b.s.at - a.s.at);
+    return out;
+  }
+  function renderBinBoard(B) {
+    const L = B[locsView];
+    const row = (x) => {
+      const acts = locsView === "prog"
+        ? `<button data-ba="view" class="btn ghost sm-btn">عرض</button><button data-ba="free" class="btn ghost sm-btn">إلغاء الفتح</button>`
+        : locsView === "done"
+        ? `<button data-ba="appr" class="btn primary sm-btn">✓ اعتماد</button><button data-ba="view" class="btn ghost sm-btn">عرض / تعديل</button><button data-ba="reopen" class="btn ghost sm-btn">إعادة فتح</button><button data-ba="del" class="btn ghost danger sm-btn">حذف</button>`
+        : `<button data-ba="view" class="btn ghost sm-btn">عرض / تعديل</button><button data-ba="unappr" class="btn ghost sm-btn">إلغاء الاعتماد</button><button data-ba="del" class="btn ghost danger sm-btn">حذف</button>`;
+      return `<div class="bb-row bb-${locsView}${x.k === locsHi ? " hi" : ""}" data-bk="${esc(x.k)}">
+        <div class="bb-top"><b dir="ltr">${esc(x.bin)}</b><span>${esc(roundTitle(x.r))} · ${esc(branchLabel(x.r.branch))}</span></div>
+        <small class="muted">${locsView === "prog" ? (x.stale ? "⏸ متوقف" : "⏳ قيد الجرد") : locsView === "done" ? "✓ جرده" : "🔒 جرده"} ${esc(x.s.by || "—")} · ${ago(x.s.at)}</small>
+        ${locsView === "prog" ? "" : `<div class="bb-nums"><span><b>${fmt(x.done)}/${fmt(x.exp)}</b> صنف</span><span><b>${fmt(x.pcs)}</b> حبة</span>${x.n > x.done ? `<span><b>${fmt(x.n - x.done)}</b> من موقع آخر</span>` : ""}<span class="${x.diff ? "w" : "okc"}">${x.diff ? `<b>${fmt(x.diff)}</b> فرق` : "✓ مطابق"}</span></div>`}
+        <div class="ra-acts">${acts}</div></div>`;
+    };
+    const empty = { prog: "لا يوجد موقع قيد الجرد الآن", done: "لا توجد مواقع بانتظار الاعتماد", appr: "لم يُعتمد أي موقع بعد" }[locsView];
+    return (locsView === "done" && L.length > 1 ? `<button class="btn primary block" id="bb-all">✓ اعتماد الكل (${fmt(L.length)} موقع)</button>` : "") +
+      (L.map(row).join("") || `<p class="muted pad">${empty}</p>`);
+  }
+  async function binAction(k, act) {
+    const i = k.indexOf("|"), r = state.rounds[k.slice(0, i)], bin = k.slice(i + 1), s = state.binSt[k];
+    if (!r || !s) return;
+    if (act === "view") {
+      if (r.status !== "open") { toast("الجرد في مرحلة المراجعة — افتحه من قائمة الجرد"); return; }
+      state.binFromAdmin = true; enterRound(r); openBin(bin); return;
+    }
+    if (act === "appr") { pushBin(bin, "approved", r, s.by); toast(`🔒 تم اعتماد الموقع ${bin}`); }
+    if (act === "unappr") { pushBin(bin, "closed", r, s.by); toast(`تم إلغاء اعتماد ${bin}`); }
+    if (act === "reopen") {
+      if (!confirm(`إعادة فتح الموقع ${bin}؟\nيرجع للموظفين يكملون جرده (الكميات المسجلة تبقى).`)) return;
+      pushBin(bin, "none", r); toast(`↺ تم إعادة فتح ${bin}`);
+    }
+    if (act === "free") { pushBin(bin, "none", r, ""); toast(`تم إلغاء فتح ${bin}`); }
+    if (act === "del") {
+      const had = binCommitted(r, bin);
+      if (!confirm(`حذف جرد الموقع ${bin}؟\nتنحذف الكميات المسجلة فيه (${fmt(had.size)} صنف) ويرجع الموقع غير مجرود.\nلا يمكن التراجع.`)) return;
+      const pre = r.id + "|";
+      for (const [ck, c] of Object.entries(state.counts)) {
+        if (!ck.startsWith(pre)) continue;
+        const del = c.entries.filter((e) => e.bin === bin);
+        if (!del.length) continue;
+        del.forEach((e) => pushDel(e.id));
+        c.entries = c.entries.filter((e) => e.bin !== bin);
+        if (!c.entries.length) delete state.counts[ck]; else normCount(c);
+      }
+      saveCounts();
+      delete drafts[k]; saveDrafts();
+      pushBin(bin, "none", r, "");
+      toast(`🗑 تم حذف جرد الموقع ${bin}`);
+    }
+    renderAdmin();
+  }
+  $("#tab-locs").addEventListener("click", (e) => {
+    const v = e.target.closest("[data-lv]");
+    if (v) { locsView = v.dataset.lv; locsHi = null; renderLocs(); return; }
+    if (e.target.closest("#bb-all")) {
+      const L = binBoard().done;
+      if (!confirm(`اعتماد ${L.length} موقع؟ بعد الاعتماد تتقفل على الموظفين (المدير يقدر يعدّل).`)) return;
+      L.forEach((x) => pushBin(x.bin, "approved", x.r, x.s.by));
+      toast(`🔒 تم اعتماد ${fmt(L.length)} موقع`);
+      renderAdmin(); return;
+    }
+    const b = e.target.closest("[data-ba]");
+    if (b) binAction(b.closest("[data-bk]").dataset.bk, b.dataset.ba);
+  });
+  function renderLocs() {
+    const B = binBoard();
+    const seg = `<div class="lv-seg">${Object.entries(LV).map(([k, t]) =>
+      `<button data-lv="${k}" class="${k === locsView ? "on" : ""} lv-${k}">${t}${B[k] ? `<b>${fmt(B[k].length)}</b>` : ""}</button>`).join("")}</div>`;
+    if (locsView !== "map") {
+      $("#tab-locs").innerHTML = seg + `<div class="bb-list">${renderBinBoard(B)}</div>`;
+      if (locsHi) setTimeout(() => $(`#tab-locs .bb-row.hi`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 50);
+      return;
+    }
+    renderLocMap(seg);
+  }
+
+  /* ---- الإشعارات (للمدير): كل موقع يخلص جرده يطلع بالجرس ---- */
+  const LS_NSEEN = "inv_notif_seen";
+  let nSeen = store.get(LS_NSEEN, 0);
+  if (!nSeen) { nSeen = Date.now(); store.set(LS_NSEEN, nSeen); }      // أول مرة: ما نطلّع القديم كله
+  let nToasted = nSeen;
+  function notifList() {
+    if (!isAdmin()) return [];
+    const mine = me()?.name;
+    const out = [];
+    for (const [k, s] of Object.entries(state.binSt)) {
+      if (!["closed", "approved"].includes(s.status) || !s.at || s.by === mine) continue;
+      const i = k.indexOf("|"), r = state.rounds[k.slice(0, i)];
+      if (!r || r.deleted) continue;
+      out.push({ k, r, bin: k.slice(i + 1), s, isNew: s.status === "closed" && s.at > nSeen });
+    }
+    return out.sort((a, b) => b.s.at - a.s.at).slice(0, 40);
+  }
+  function updateBell() {
+    const adm = isAdmin();
+    const n = adm ? notifList().filter((x) => x.isNew).length : 0;
+    $$(".bell-btn").forEach((b) => {
+      b.hidden = !adm;
+      const i = b.querySelector(".bell-n");
+      i.hidden = !n; i.textContent = n > 99 ? "99+" : n;
+      b.classList.toggle("ring", n > 0);
+    });
+  }
+  // من المزامنة: موقع جديد تم جرده
+  function notifyBins() {
+    if (!isAdmin()) return;
+    const fresh = notifList().filter((x) => x.isNew && x.s.at > nToasted);
+    updateBell();
+    if (!fresh.length) return;
+    nToasted = Math.max(...fresh.map((x) => x.s.at));
+    navigator.vibrate?.([40, 60, 40]);
+    toast(fresh.length === 1 ? `🔔 تم جرد الموقع ${fresh[0].bin} — ${fresh[0].s.by || ""}` : `🔔 تم جرد ${fresh.length} مواقع جديدة`, 3500);
+  }
+  function openNotifs() {
+    const L = notifList();
+    $("#nt-list").innerHTML = L.length ? L.map((x) => `<button class="nt-row${x.isNew ? " new" : ""}" data-nk="${esc(x.k)}">
+        <span class="nt-ic">${x.s.status === "approved" ? "🔒" : "✓"}</span>
+        <span class="nt-t"><b>تم جرد الموقع <bdi dir="ltr">${esc(x.bin)}</bdi></b><small>${esc(x.s.by || "—")} · ${esc(roundTitle(x.r))} · ${ago(x.s.at)}${x.s.status === "approved" ? " · معتمد" : ""}</small></span>
+        <svg class="chev" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>`).join("")
+      : `<p class="muted pad">لا توجد إشعارات</p>`;
+    openOverlay("notif-backdrop");
+    nSeen = nToasted = Date.now(); store.set(LS_NSEEN, nSeen);
+    updateBell();
+  }
+  $$(".bell-btn").forEach((b) => b.addEventListener("click", openNotifs));
+  $("#nt-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-nk]"); if (!b) return;
+    const s = state.binSt[b.dataset.nk];
+    closeOverlay("notif-backdrop");
+    adminTab = "locs"; locsView = s?.status === "approved" ? "appr" : s?.status === "open" ? "prog" : s?.status === "closed" ? "done" : "map";
+    locsHi = b.dataset.nk;
+    go("admin");
+  });
+
   // ---- خريطة المواقع: وش انجرد ومتى ومين، ووش باقي ----
   let locsBranch = null, locsSel = null;
-  function renderLocs() {
+  function renderLocMap(seg) {
     const bs = state.data.branches;
     if (!bs.length) { $("#tab-locs").innerHTML = `<p class="muted pad">ارفع المخزون أول</p>`; return; }
     if (!bs.includes(locsBranch)) {
@@ -2779,7 +2983,7 @@
         ${list.some((x) => x.bin === locsSel) ? binDetail(list.find((x) => x.bin === locsSel)) : ""}</div>`;
     }).join("");
     const all = tot.done + tot.prog + tot.left;
-    $("#tab-locs").innerHTML =
+    $("#tab-locs").innerHTML = seg +
       `<div class="locs-top"><select id="locs-branch">${bs.map((b) => `<option value="${esc(b)}"${b === locsBranch ? " selected" : ""}>${esc(branchLabel(b))}</option>`).join("")}</select>
         <div class="legend"><span class="bin done"></span>تم <span class="bin prog"></span>جاري <span class="bin left"></span>باقي</div></div>
       <div class="sc-nums rp-nums">
@@ -2836,7 +3040,7 @@
     const items = nlList.map((it) => it.n);
     if (!items.length) return;
     closeOverlay("noloc-backdrop");
-    state.lastRoundBranch = locsBranch;
+    qkPreBranch = locsBranch;
     openQuick(null);
     qk.sel = new Set(items);
     $("#qk-only").checked = true;
@@ -3270,7 +3474,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "29";
+  const APP_VER = "30";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 
