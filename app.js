@@ -1316,6 +1316,13 @@
     window.DB.note?.(`رف ${state.binCur}: باركود ${res.code} → ${res.items.map((i) => i.n).join("، ") || "—"}`);
     if (res.items.length === 1) {
       const it = res.items[0];
+      // رف درجة ثانية: الباركود طلع الأصلي بس الأصلي مو بهالرف وفيه نسخة منه هنا (J / M / -K …) → ما نحسب، يختار يدوي
+      const twins = gradeTwinsHere(it);
+      if (twins.length) {
+        beep("err");
+        openPick(null, twins, "", { title: "⚠ هذا رف درجة ثانية", sub: `الباركود يطلع الأصلي ${it.n} (موقعه ${it.loc || "—"}) — اختر الصنف الصحيح يدوي` });
+        return null;
+      }
       beep(it.x || binOf(it.loc) === state.binCur ? "ok" : "warn");
       if (binQtyMode) { openBinQty(it, "add"); return it; }
       binAdd(it, 1);
@@ -1327,10 +1334,17 @@
   }
   // اختيار صنف (باركود فيه أكثر من صنف / غير معروف / بحث يدوي)
   let pick = null;
-  function openPick(code, candidates, query) {
+  // نسخ الدرجة الثانية من نفس الرقم الموجودة بالرف المفتوح (والأصلي نفسه مو بهالرف)
+  function gradeTwinsHere(it) {
+    if (it.x || binOf(it.loc) === state.binCur) return [];
+    const k = it.nk.toUpperCase();
+    if (k.length < 7) return [];
+    return state.branchAll.filter((o) => o !== it && !o.x && o.n !== it.n && binOf(o.loc) === state.binCur && o.nk.toUpperCase().includes(k));
+  }
+  function openPick(code, candidates, query, txt) {
     pick = { code };
-    $("#pk-title").textContent = code ? (candidates.length ? "أكثر من صنف لهذا الباركود" : "باركود غير معروف") : "بحث يدوي";
-    $("#pk-sub").textContent = code ? `${code} — اختيارك يربطه بالصنف للمرات الجاية` : `يضاف للموقع ${state.binCur}`;
+    $("#pk-title").textContent = txt?.title || (code ? (candidates.length ? "أكثر من صنف لهذا الباركود" : "باركود غير معروف") : "بحث يدوي");
+    $("#pk-sub").textContent = txt?.sub || (code ? `${code} — اختيارك يربطه بالصنف للمرات الجاية` : `يضاف للموقع ${state.binCur}`);
     $("#pk-search").value = candidates.length ? "" : query || "";
     renderPick(candidates);
     openOverlay("pick-backdrop");
@@ -3144,7 +3158,7 @@
       if ($$(".sheet-backdrop:not([hidden])").length) state.reloadOnClose = go2; else go2();
     });
   }
-  const APP_VER = "26";
+  const APP_VER = "27";
   $("#app-ver").textContent = "الإصدار " + APP_VER;
   $("#login-ver").textContent = `${CFG.companyName} · الإصدار ${APP_VER}`;
 

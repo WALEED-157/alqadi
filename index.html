@@ -309,15 +309,14 @@
   <header class="topbar">
     <span class="tb-side tb-right"><button type="button" class="mode-chip" id="tys-more" hidden>⋯ خيارات</button></span>
     <span class="tb-title" id="tys-title">—</span>
-    <button class="tb-side tb-left back-btn" data-back="ty" aria-label="رجوع">
-      الشحنات
+    <button class="tb-side tb-left back-btn" id="tys-back" aria-label="رجوع">
+      <span id="tys-back-t">الشحنات</span>
       <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
   </header>
-  <div class="ty-steps" id="tys-steps">
-    <span data-st="cartons">١ جرد الكراتين</span><span data-st="items">٢ جرد الأصناف</span><span data-st="done">✓ مكتمل</span>
-  </div>
   <main class="bins-body">
+    <div id="tys-hub" class="ty-hub"></div>
+    <div id="tys-work">
     <p class="ty-help" id="tys-help"></p>
     <div class="bins-open ty-scan">
       <input id="tys-input" data-scan-clear dir="ltr" placeholder="اضرب أو اكتب رقم الكرتون" autocapitalize="characters" autocomplete="off" enterkeyhint="go">
@@ -328,6 +327,7 @@
     </div>
     <div class="sc-nums rp-nums" id="tys-sum"></div>
     <div id="tys-list"></div>
+    </div>
   </main>
   <div class="bin-bar"><button type="button" class="btn primary bin-close" id="tys-main">—</button></div>
 </section>
@@ -898,7 +898,7 @@
     </div>
     <label class="field" id="tyn-branch-f"><span>الفرع</span><select id="tyn-branch"></select></label>
     <label class="field"><span>اسم الشحنة <small class="muted">(تاريخ اليوم — تقدر تعدّله)</small></span><input id="tyn-name" autocomplete="off" dir="auto"></label>
-    <p class="hint">أنت اللي بتجرد الكراتين بهالشحنة — جرد الأصناف بعدها يكون للكل.</p>
+    <p class="hint">أنت اللي بتجرد الكراتين بهالشحنة (وتقدر تضيف كراتين بأي وقت) — جرد الأصناف للكل.</p>
     <button class="btn primary block" id="tyn-save">بدء جرد الكراتين ←</button>
   </div>
 </div>
@@ -973,7 +973,7 @@
     <div class="data-list">
       <button class="data-btn" id="tyo-export"><span><strong>⬇ سحب Excel</strong><small>رقم الصنف، الكمية، التاريخ، رقم الكرتون وتفاصيله</small></span></button>
       <button class="data-btn" id="tyo-rename"><span><strong>✎ تغيير اسم الشحنة</strong></span></button>
-      <button class="data-btn" id="tyo-back"><span><strong>↩ إرجاع لجرد الكراتين</strong><small>لو نسيتوا كرتون</small></span></button>
+      <button class="data-btn" id="tyo-back"><span><strong>↺ إعادة فتح الشحنة</strong><small>ترجع مفتوحة للموظفين</small></span></button>
       <button class="data-btn" id="tyo-arch"><span><strong>🗄 أرشفة</strong><small>تختفي من الموظفين وتبقى عندك بالأرشيف للبحث</small></span></button>
       <button class="data-btn danger" id="tyo-del"><span><strong>حذف الشحنة</strong></span></button>
     </div>

@@ -118,8 +118,8 @@ window.TY = (() => {
       if (scr === "tys") renderShip();
       else {
         const c = T.cartons[ui.carton?.code];
-        if (!c || c.deleted || c.ship_id !== s.id) { A.go("tys/" + s.id); return; }
-        if (takenBy(c) && !A.isAdmin()) { toast(`الكرتون ${c.code} صار عند ${takenBy(c)}`, 3500); A.go("tys/" + s.id); return; }
+        if (!c || c.deleted || c.ship_id !== s.id) { A.go(shipUrl()); return; }
+        if (takenBy(c) && !A.isAdmin()) { toast(`الكرتون ${c.code} صار عند ${takenBy(c)}`, 3500); A.go(shipUrl()); return; }
         ui.carton = c; renderCarton();
       }
     }
@@ -183,23 +183,32 @@ window.TY = (() => {
         .map(([v, t]) => `<button class="chip${ui.branchF === v ? " active" : ""}" data-b="${esc(v)}">${esc(t)}</button>`).join("") : "";
       if (ui.branchF) list = list.filter((s) => s.branch === ui.branchF);
     } else $("#ty-filt").innerHTML = "";
-    list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    // المفتوحة فوق (الأحدث أول) والمكتملة تحت
+    list.sort((a, b) => (a.status === "done") - (b.status === "done") || (b.created_at || 0) - (a.created_at || 0));
     ui.listed = list;
+    const today = new Date().toDateString();
+    let doneHdr = false;
     $("#ty-list").innerHTML = list.length ? list.map((s) => {
-      const t = shipStats(s);
-      const pct = s.status === "cartons" ? 0 : t.n ? Math.round((t.closed / t.n) * 100) : 0;
-      const badge = { cartons: "", items: "b2", done: "b3" }[s.status];
-      return `<button class="branch-card ty-card st-${s.status}" data-s="${esc(s.id)}">
-        <span class="bc-icon">📦</span>
-        <span><strong>${esc(s.name || "شحنة")}</strong>
+      const t = shipStats(s), done = s.status === "done";
+      const pct = done ? 100 : t.n ? Math.round((t.closed / t.n) * 100) : 0;
+      const isToday = new Date(s.created_at || 0).toDateString() === today;
+      const hdr = done && !doneHdr ? ((doneHdr = true), `<p class="ty-sec">✓ المكتملة${adm ? "" : " — للعرض عند المدير"}</p>`) : "";
+      return `${hdr}<button class="branch-card ty-card st-${done ? "done" : "items"}${done && !adm ? " locked" : ""}" data-s="${esc(s.id)}">
+        <span class="bc-icon">${done ? "✓" : "📦"}</span>
+        <span><strong>${esc(s.name || "شحنة")}${isToday && !done ? ` <i class="badge">اليوم</i>` : ""}</strong>
           <small>${esc(A.branchLabel(s.branch))} · ${esc(dShort(s.created_at))}${s.by_name ? " · " + esc(s.by_name) : ""}</small>
-          <small><i class="badge ${badge}">${ST[s.status]}</i> ${fmt(t.n)} كرتون${s.status !== "cartons" ? ` · انقفل ${fmt(t.closed)}` : ` · ${fmt(t.qty)} حبة`}${t.bad ? ` · <b class="ty-bad">⚠ فرق ${fmt(t.bad)}</b>` : ""}</small></span>
-        <span class="bc-pct">${s.status === "cartons" ? fmt(t.n) : s.status === "done" ? "✓" : pct + "%"}</span>
-        <span class="bc-bar"><span style="width:${s.status === "done" ? 100 : pct}%"></span></span>
+          <small><i class="badge ${done ? "b3" : "b2"}">${done ? "مكتمل" : "مفتوحة"}</i> ${fmt(t.n)} كرتون · انقفل ${fmt(t.closed)}${t.bad ? ` · <b class="ty-bad">⚠ فرق ${fmt(t.bad)}</b>` : ""}</small></span>
+        <span class="bc-pct">${done ? "✓" : pct + "%"}</span>
+        <span class="bc-bar"><span style="width:${pct}%"></span></span>
       </button>`;
     }).join("") : `<div class="empty"><p>ما فيه شحنات حالياً</p><p class="muted">اضغط "شحنة جديدة" وابدأ بجرد الكراتين</p></div>`;
   }
-  $("#ty-list").addEventListener("click", (e) => { const b = e.target.closest("[data-s]"); if (b) A.go("tys/" + b.dataset.s); });
+  $("#ty-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-s]"); if (!b) return;
+    const s = T.ships[b.dataset.s];
+    if (s?.status === "done" && !A.isAdmin()) { toast("الشحنة مكتملة ✓ — ما تنفتح إلا للمدير"); return; }
+    A.go("tys/" + b.dataset.s);
+  });
   $("#ty-filt").addEventListener("click", (e) => { const b = e.target.closest("[data-b]"); if (!b) return; ui.branchF = b.dataset.b; renderList(); });
   $("#ty-arch-btn").addEventListener("click", () => A.go("tya"));
 
@@ -222,67 +231,96 @@ window.TY = (() => {
       status: "cartons", by_name: me()?.name || "", created_at: now, archived: false, deleted: false });
     T.ships[s.id] = s; save(); pushShip(s);
     A.closeOverlay("tyn-backdrop");
-    A.go("tys/" + s.id);
+    ui.view = "c";
+    A.go(`tys/${s.id}/c`);
   });
 
   /* ===================== داخل الشحنة ===================== */
+  /* داخل الشحنة: قائمة فيها ٣ أقسام (يشتغلون مع بعض، مو مراحل)
+     ١) جرد الكراتين — للي فتح الشحنة + المدير، ويقدر يضيف كراتين بأي وقت (لو اكتشف كراتين نسيها)
+     ٢) جرد الأصناف — للكل: الكراتين اللي ما انقفلت
+     ٣) الأرشيف — الكراتين اللي انقفلت (للعرض، وإعادة الفتح لصاحبها أو المدير) */
+  const VIEWS = { c: "📦 جرد الكراتين", i: "🔎 جرد الأصناف", a: "🗄 أرشيف الكراتين" };
   function renderShip() {
-    const s = ui.ship, t = shipStats(s), st = s.status;
-    const cs = cartonsOf(s.id);
-    $("#tys-title").textContent = s.name || A.branchLabel(s.branch);
-    $("#tys-more").hidden = !A.isAdmin();
-    $$("#tys-steps [data-st]").forEach((x) => {
-      const order = ["cartons", "items", "done"];
-      x.className = order.indexOf(x.dataset.st) < order.indexOf(st) ? "past" : x.dataset.st === st ? "on" : "";
-    });
-    const owner = isShipOwner(s);
-    const wait = st === "cartons" && !owner;          // جرد الكراتين عند واحد ثاني
-    $(".ty-scan").hidden = wait;
-    $("#tys-input").placeholder = st === "cartons" ? "اضرب أو اكتب رقم الكرتون" : "اضرب باركود الكرتون لفتحه";
-    $("#tys-go").textContent = st === "cartons" ? "إضافة" : "فتح";
-    $("#tys-help").innerHTML = wait
-      ? `🔒 جرد الكراتين عند <b>${esc(s.by_name || "موظف ثاني")}</b> — جرد الأصناف يفتح للكل لما يقفل جرد الكراتين.`
-      : st === "cartons"
-      ? `<b>${esc(A.branchLabel(s.branch))}</b> — اضرب باركود كل كرتون (الملصق الأصفر) واكتب <b>QTY</b> و <b>LINES</b>. لما تخلص كل الكراتين اقفل جرد الكراتين.`
-      : st === "items" ? `<b>${esc(A.branchLabel(s.branch))}</b> — اختر كرتون أو اضرب باركوده. الكرتون اللي تاخذه ينقفل على الباقين لين تخلصه.`
-      : `الشحنة مكتملة ✓${A.isAdmin() ? " — اسحب Excel أو أرشفها من «خيارات»" : ""}`;
-    $("#tys-sum").innerHTML = st === "cartons"
+    const s = ui.ship, t = shipStats(s), v = ui.view || "", done = s.status === "done";
+    const cs = cartonsOf(s.id), owner = isShipOwner(s);
+    const hub = !v;
+    $("#tys-title").textContent = hub ? s.name || A.branchLabel(s.branch) : VIEWS[v];
+    $("#tys-back-t").textContent = hub ? "الشحنات" : "الشحنة";
+    $("#tys-more").hidden = !A.isAdmin() || !hub;
+    $("#tys-hub").hidden = !hub;
+    $("#tys-work").hidden = hub;
+    const main = $("#tys-main");
+    main.disabled = false; main.className = "btn primary bin-close";
+
+    if (hub) {
+      const myOpen = cs.filter((c) => c.status !== "closed" && c.owner === A.myId() && !takenBy(c)).length;
+      const free = cs.filter((c) => c.status !== "closed" && !takenBy(c)).length;
+      $("#tys-hub").innerHTML = `
+        <p class="ty-help"><b>${esc(s.name || "")}</b> · ${esc(A.branchLabel(s.branch))} · ${esc(dShort(s.created_at))}${s.by_name ? " · فتحها " + esc(s.by_name) : ""}${done ? " · <b>✓ مكتملة</b>" : ""}</p>
+        <button class="branch-card ty-hub-card" data-v="c"><span class="bc-icon">📦</span>
+          <span><strong>١ جرد الكراتين</strong><small>${fmt(t.n)} كرتون · QTY ${fmt(t.qty)} · LINES ${fmt(t.lines)}</small>
+          <small>${owner ? (done ? "للعرض" : "تقدر تضيف كراتين بأي وقت") : `🔒 عند ${esc(s.by_name || "موظف ثاني")} — للعرض`}</small></span>
+          <span class="bc-pct">${fmt(t.n)}</span></button>
+        <button class="branch-card ty-hub-card" data-v="i"><span class="bc-icon">🔎</span>
+          <span><strong>٢ جرد الأصناف</strong><small>باقي ${fmt(t.left)} كرتون${t.open ? ` · جاري ${fmt(t.open)}` : ""}${myOpen ? ` · <b>معك ${fmt(myOpen)}</b>` : ""}</small>
+          <small>${t.left ? `${fmt(free)} حر تقدر تاخذه` : t.n ? "كل الكراتين انقفلت ✓" : "لسا ما انضاف كراتين"}</small></span>
+          <span class="bc-pct">${fmt(t.left)}</span></button>
+        <button class="branch-card ty-hub-card" data-v="a"><span class="bc-icon">🗄</span>
+          <span><strong>٣ الأرشيف</strong><small>${fmt(t.closed)} كرتون انقفل · مطابق ${fmt(t.closed - t.bad)}${t.bad ? ` · <b class="ty-bad">⚠ فرق ${fmt(t.bad)}</b>` : ""}</small>
+          <small>الكراتين المقفولة — للعرض</small></span>
+          <span class="bc-pct">${fmt(t.closed)}</span></button>`;
+      main.hidden = false;
+      if (done) { main.hidden = !A.isAdmin(); main.textContent = "⬇ سحب Excel"; }
+      else if (!owner) { main.hidden = true; }
+      else if (!t.n) { main.textContent = "✓ إنهاء الشحنة"; main.disabled = true; }
+      else if (t.left) { main.textContent = `باقي ${fmt(t.left)} كرتون ما انقفل`; main.disabled = true; }
+      else main.textContent = "✓ إنهاء الشحنة";
+      return;
+    }
+
+    // ---- الأقسام ----
+    const canAdd = v === "c" && owner && !done;
+    $(".ty-scan").hidden = done || (v === "c" && !owner);
+    $("#tys-input").placeholder = v === "c" ? "اضرب أو اكتب رقم الكرتون" : "اضرب باركود الكرتون أو دوّره";
+    $("#tys-go").textContent = v === "c" ? "إضافة" : "فتح";
+    $("#tys-help").innerHTML = v === "c"
+      ? (canAdd ? `اضرب باركود كل كرتون (الملصق الأصفر) واكتب <b>QTY</b> و <b>LINES</b>. نسيت كراتين؟ ضيفها بأي وقت — تطلع على طول بجرد الأصناف.`
+        : `🔒 جرد الكراتين عند <b>${esc(s.by_name || "موظف ثاني")}</b> — هنا للعرض بس.`)
+      : v === "i" ? `اختر كرتون أو اضرب باركوده. الكرتون اللي تاخذه ينقفل على الباقين لين تخلصه، ولما ينقفل يروح للأرشيف.`
+      : `الكراتين اللي انقفلت — اضغط على كرتون تشوف أصنافه${owner ? " أو تعيد فتحه" : ""}.`;
+    $("#tys-sum").innerHTML = v === "c"
       ? `<div><b>${fmt(t.n)}</b><small>كرتون</small></div><div><b>${fmt(t.qty)}</b><small>QTY حبة</small></div><div><b>${fmt(t.lines)}</b><small>LINES</small></div>`
-      : `<div><b>${fmt(t.n)}</b><small>كرتون</small></div><div class="okc"><b>${fmt(t.closed - t.bad)}</b><small>مطابق</small></div>
-         <div class="${t.bad ? "w" : ""}"><b>${fmt(t.bad)}</b><small>فرق</small></div><div><b>${fmt(t.open)}</b><small>جاري</small></div><div><b>${fmt(t.left - t.open)}</b><small>لم يبدأ</small></div>`;
-    // القائمة
+      : v === "i"
+      ? `<div><b>${fmt(t.left)}</b><small>باقي</small></div><div><b>${fmt(t.open)}</b><small>جاري</small></div><div><b>${fmt(t.left - t.open)}</b><small>لم يبدأ</small></div>`
+      : `<div><b>${fmt(t.closed)}</b><small>انقفل</small></div><div class="okc"><b>${fmt(t.closed - t.bad)}</b><small>مطابق</small></div><div class="${t.bad ? "w" : ""}"><b>${fmt(t.bad)}</b><small>فرق</small></div>`;
     const q = A.codeKey($("#tys-input").value);
-    let list = cs;
-    if (st !== "cartons" && q) list = list.filter((c) => c.code.includes(q));
+    let list = v === "i" ? cs.filter((c) => c.status !== "closed") : v === "a" ? cs.filter((c) => c.status === "closed") : cs;
+    if (v !== "c" && q) list = list.filter((c) => c.code.includes(q));
     const mine = (c) => c.owner && c.owner === A.myId() && c.status !== "closed";
-    // معي أول، بعدها الحر، بعدها اللي عند غيري، بعدها المقفول
-    const rank = (c) => (c.status === "closed" ? (c.mismatch ? 3 : 4) : mine(c) ? 0 : takenBy(c) ? 2 : 1);
-    list.sort(st === "cartons" ? (a, b) => (b.at || 0) - (a.at || 0) : (a, b) => rank(a) - rank(b) || a.code.localeCompare(b.code));
+    // معي أول، بعدها الحر، بعدها اللي عند غيري
+    const rank = (c) => (mine(c) ? 0 : takenBy(c) ? 2 : 1);
+    list.sort(v === "c" ? (a, b) => (b.at || 0) - (a.at || 0)
+      : v === "a" ? (a, b) => (b.mismatch - a.mismatch) || (b.closed_at || 0) - (a.closed_at || 0)
+      : (a, b) => rank(a) - rank(b) || a.code.localeCompare(b.code));
     $("#tys-list").innerHTML = list.length ? list.map((c) => {
-      const tl = st === "cartons" ? null : tally(c);
-      const tb = st === "cartons" ? "" : takenBy(c);
+      const tl = v === "c" && c.status === "new" ? null : tally(c);
+      const tb = takenBy(c);
       const cls = c.status === "closed" ? (c.mismatch ? "bad" : "closed") : tb ? "busy" : mine(c) ? "draft" : "left";
-      const lab = st === "cartons" ? esc(c.by_name || "")
-        : c.status === "closed" ? (c.mismatch ? "⚠ فرق" : "✓ مطابق") + (c.closed_by ? ` · ${esc(c.closed_by)}` : "")
-        : tb ? `🔒 عند ${esc(tb)}` : mine(c) ? "معك — كمّل" : "حر";
+      const lab = c.status === "closed" ? (c.mismatch ? "⚠ فرق" : "✓ مطابق") + (c.closed_by ? ` · ${esc(c.closed_by)}` : "")
+        : tb ? `🔒 عند ${esc(tb)}` : mine(c) ? "معك — كمّل" : v === "c" ? esc(c.by_name || "") : "حر";
       return `<button class="bin-row ty-crow st-${cls}" data-c="${esc(c.code)}">
         <span class="tc-main"><b dir="ltr">${esc(c.code)}</b>
         <small>QTY <b>${fmt(c.qty)}</b> · LINES <b>${fmt(c.lines)}</b>${tl && (tl.qty || c.status !== "new") ? ` — مجرود ${fmt(tl.qty)} حبة · ${fmt(tl.lines)} صنف` : ""}</small></span>
         <i>${lab}</i></button>`;
-    }).join("") : `<p class="muted pad">${q && st !== "cartons" ? "ما فيه كرتون بهالرقم" : st === "cartons" ? "ما انمسح ولا كرتون — اضرب أول باركود" : "ما فيه كراتين"}</p>`;
-    // الزر الرئيسي
-    const main = $("#tys-main");
-    main.hidden = false; main.disabled = false; main.className = "btn primary bin-close";
-    if (wait) { main.textContent = `🔒 جرد الكراتين عند ${s.by_name || "موظف ثاني"}`; main.disabled = true; }
-    else if (st === "cartons") { main.textContent = `قفل جرد الكراتين (${fmt(t.n)}) ← جرد الأصناف`; main.disabled = !t.n; }
-    else if (st === "items") {
-      if (t.left) { main.textContent = `باقي ${fmt(t.left)} كرتون ما انقفل`; main.disabled = true; }
-      else main.textContent = "✓ إنهاء الشحنة";
-    } else if (A.isAdmin()) main.textContent = "⬇ سحب Excel";
-    else { main.textContent = "الشحنة مكتملة ✓"; main.disabled = true; }
+    }).join("") : `<p class="muted pad">${q && v !== "c" ? "ما فيه كرتون بهالرقم"
+      : v === "c" ? "ما انمسح ولا كرتون — اضرب أول باركود" : v === "i" ? (t.n ? "كل الكراتين انقفلت ✓ — تلقاها بالأرشيف" : "لسا ما انضاف كراتين") : "ما انقفل ولا كرتون للحين"}</p>`;
+    main.hidden = true;
   }
 
-  $("#tys-input").addEventListener("input", () => { if (ui.ship?.status !== "cartons") renderShip(); });
+  $("#tys-input").addEventListener("input", () => { if (ui.view && ui.view !== "c") renderShip(); });
+  $("#tys-hub").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (b) A.go(`tys/${ui.ship.id}/${b.dataset.v}`); });
+  $("#tys-back").addEventListener("click", back);
   $("#tys-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#tys-go").click(); } });
   $("#tys-go").addEventListener("click", () => {
     const v = $("#tys-input").value;
@@ -294,12 +332,14 @@ window.TY = (() => {
   $("#tys-list").addEventListener("click", (e) => {
     const b = e.target.closest("[data-c]"); if (!b) return;
     const c = T.cartons[b.dataset.c]; if (!c) return;
-    if (ui.ship.status === "cartons") { if (isShipOwner(ui.ship)) openCartonForm(c.code, c); else toast(`🔒 جرد الكراتين عند ${ui.ship.by_name || "موظف ثاني"}`); }
-    else takeCarton(c);
+    if (ui.view === "c") {
+      if (isShipOwner(ui.ship) && ui.ship.status !== "done") openCartonForm(c.code, c);
+      else toast(ui.ship.status === "done" ? "الشحنة مكتملة — للعرض بس" : `🔒 جرد الكراتين عند ${ui.ship.by_name || "موظف ثاني"}`);
+    } else takeCarton(c);
   });
-  // اسم الشحنة: يعدّله اللي فتحها أو المدير (بالضغط على العنوان)
+  // اسم الشحنة: يعدّله اللي فتحها أو المدير (بالضغط على العنوان بالقائمة)
   $("#tys-title").addEventListener("click", () => {
-    const s = ui.ship; if (!s || !isShipOwner(s)) return;
+    const s = ui.ship; if (!s || ui.view || !isShipOwner(s)) return;
     const v = prompt("اسم الشحنة", s.name || ""); if (v == null || !v.trim()) return;
     s.name = v.trim(); touch(s); save(); pushShip(s); renderShip();
   });
@@ -334,8 +374,11 @@ window.TY = (() => {
     const s = ui.ship;
     const code = A.codeKey(raw);
     if (code.length < 5) { A.beep("err"); toast("رقم الكرتون قصير — تأكد منه"); return; }
-    if (s.status === "cartons" && !isShipOwner(s)) { A.beep("err"); toast(`🔒 جرد الكراتين عند ${s.by_name || "موظف ثاني"}`); return; }
-    if (s.status === "cartons") return addCarton(code);
+    if (ui.view === "c") {
+      if (s.status === "done") { A.beep("err"); toast("الشحنة مكتملة — للعرض بس"); return; }
+      if (!isShipOwner(s)) { A.beep("err"); toast(`🔒 جرد الكراتين عند ${s.by_name || "موظف ثاني"}`); return; }
+      return addCarton(code);
+    }
     let c = T.cartons[code];
     if (!(c && !c.deleted && c.ship_id === s.id) && typed) {
       const part = cartonsOf(s.id).filter((x) => x.code.includes(code));
@@ -344,7 +387,7 @@ window.TY = (() => {
     if (c && !c.deleted && c.ship_id === s.id) { if (!takenBy(c) || A.isAdmin()) A.beep("ok"); takeCarton(c); return; }
     A.beep("err");
     if (c && !c.deleted) { const o = T.ships[c.ship_id]; toast(`الكرتون ${code} موجود بشحنة ثانية: ${o?.name || ""} (${A.branchLabel(c.branch)})`, 4000); return; }
-    toast(`الكرتون ${code} مو موجود بهالشحنة — ما انمسح بجرد الكراتين`, 4000);
+    toast(`الكرتون ${code} مو موجود بهالشحنة — ما انمسح بجرد الكراتين${isShipOwner(s) && s.status !== "done" ? " (ضيفه من «جرد الكراتين»)" : ""}`, 4000);
   }
 
   // ---- إضافة كرتون (ممنوع التكرار) ----
@@ -416,18 +459,14 @@ window.TY = (() => {
     for (const l of t.ls) { l.deleted = true; l.qty = 0; l.at = Date.now(); pushLine(l); }
     save();
     A.closeOverlay("tyq-backdrop");
-    if (state.screen === "tyc") A.go("tys/" + ui.ship.id); else renderShip();
+    if (state.screen === "tyc") A.go(`tys/${ui.ship.id}/i`); else renderShip();
   });
 
   // ---- الزر الرئيسي بالشحنة ----
   $("#tys-main").addEventListener("click", () => {
     const s = ui.ship, t = shipStats(s);
-    if (s.status === "cartons") {
-      if (!t.n) return;
-      if (!confirm(`قفل جرد الكراتين؟\n${t.n} كرتون · ${t.qty} حبة · ${t.lines} صنف\nبعدها تبدأون جرد الأصناف داخل كل كرتون`)) return;
-      s.status = "items"; s.cartons_at = Date.now();
-    } else if (s.status === "items") {
-      if (t.left) return;
+    if (s.status !== "done") {
+      if (!isShipOwner(s) || !t.n || t.left) return;
       if (!confirm(`إنهاء الشحنة؟\n${t.n} كرتون${t.bad ? ` (منها ${t.bad} بفرق)` : " — كلها مطابقة ✓"}`)) return;
       s.status = "done"; s.done_at = Date.now();
     } else { if (A.isAdmin()) exportShips([s]); return; }
@@ -440,7 +479,7 @@ window.TY = (() => {
   $("#tys-more").addEventListener("click", () => {
     const s = ui.ship;
     $("#tyo-title").textContent = s.name || "خيارات الشحنة";
-    $("#tyo-back").hidden = s.status === "cartons";
+    $("#tyo-back").hidden = s.status !== "done";
     A.openOverlay("tyo-backdrop");
   });
   $("#tyo-export").addEventListener("click", () => { A.closeOverlay("tyo-backdrop"); exportShips([ui.ship]); });
@@ -450,8 +489,8 @@ window.TY = (() => {
   });
   $("#tyo-back").addEventListener("click", () => {
     const s = ui.ship;
-    if (!confirm("إرجاع الشحنة لمرحلة جرد الكراتين؟ (جرد الأصناف اللي صار يبقى محفوظ)")) return;
-    s.status = "cartons"; s.done_at = null; touch(s); save(); pushShip(s);
+    if (!confirm("إعادة فتح الشحنة؟ ترجع مفتوحة للموظفين (كل الجرد اللي صار يبقى محفوظ)")) return;
+    s.status = "items"; s.done_at = null; touch(s); save(); pushShip(s);
     A.closeOverlay("tyo-backdrop"); renderShip();
   });
   $("#tyo-arch").addEventListener("click", () => {
@@ -677,7 +716,7 @@ window.TY = (() => {
       touch(c); save(); pushCarton(c, true);
     }
   }
-  $("#tyc-back").addEventListener("click", () => { leaveCarton(); A.go("tys/" + ui.ship.id); });
+  $("#tyc-back").addEventListener("click", () => { leaveCarton(); A.go(shipUrl()); });
 
   // ---- قفل الكرتون: مطابق = ينقفل، فرق = تنبيه ----
   $("#tyc-close").addEventListener("click", () => {
@@ -687,6 +726,7 @@ window.TY = (() => {
       if (!confirm(`إعادة فتح الكرتون ${c.code} للتعديل؟`)) return;
       c.status = "open"; c.mismatch = false; c.closed_by = null; c.closed_at = null;
       c.owner = A.myId(); c.owner_name = me()?.name || ""; c.owner_at = Date.now();
+      if (ui.view === "a") ui.view = "i";             // رجع مفتوح = مكانه بجرد الأصناف
       touch(c); save(); pushCarton(c); renderCarton();
       return;
     }
@@ -712,7 +752,7 @@ window.TY = (() => {
     navigator.vibrate?.(30);
     const left = shipStats(s).left;
     toast(`${mismatch ? "⚠ انقفل الكرتون مع الفرق" : "✓ مطابق — انقفل الكرتون"}${left ? ` · باقي ${left} كرتون` : " · كل الكراتين انقفلت ✓"}`, 3000);
-    A.go("tys/" + s.id);
+    A.go(shipUrl());
   }
 
   /* ===================== Excel ===================== */
@@ -863,23 +903,24 @@ window.TY = (() => {
   });
 
   /* ===================== التنقل ===================== */
+  const shipUrl = (s = ui.ship) => "tys/" + s.id + (ui.view ? "/" + ui.view : "");
   function shipOk(id) {
     const s = T.ships[id];
-    return s && !s.deleted && !s.archived && canSee(s.branch) ? s : null;
+    return s && !s.deleted && !s.archived && canSee(s.branch) && (s.status !== "done" || A.isAdmin()) ? s : null;
   }
   function route(h) {
     let m;
     if (h === "ty") { renderList(); A.show("ty"); A.runSync(); return; }
     if (h === "tya") { if (!A.isAdmin()) return A.go("ty"); A.show("tya"); renderArchive(); return; }
-    if ((m = h.match(/^tys\/([\w-]+)$/))) {
+    if ((m = h.match(/^tys\/([\w-]+)(?:\/([cia]))?$/))) {
       const s = shipOk(m[1]); if (!s) return A.go("ty");
-      if (ui.ship?.id !== s.id) $("#tys-input").value = "";
-      ui.ship = s; renderShip(); A.show("tys"); return;
+      if (ui.ship?.id !== s.id || ui.view !== (m[2] || "")) $("#tys-input").value = "";
+      ui.ship = s; ui.view = m[2] || ""; renderShip(); A.show("tys"); return;
     }
     if ((m = h.match(/^tyc\/([\w-]+)\/(.+)$/))) {
       const s = shipOk(m[1]), c = s && T.cartons[decodeURIComponent(m[2])];
-      if (!c || c.deleted || c.ship_id !== s.id) return A.go(s ? "tys/" + s.id : "ty");
-      if (takenBy(c) && !A.isAdmin()) { toast(`🔒 الكرتون ${c.code} عند ${takenBy(c)}`); return A.go("tys/" + s.id); }
+      if (!c || c.deleted || c.ship_id !== s.id) return A.go(s ? shipUrl(s) : "ty");
+      if (takenBy(c) && !A.isAdmin()) { toast(`🔒 الكرتون ${c.code} عند ${takenBy(c)}`); return A.go(shipUrl(s)); }
       if (ui.carton?.code !== c.code) { ui.hist = []; ui.last = null; }
       ui.ship = s; ui.carton = c; renderCarton(); A.show("tyc"); return;
     }
@@ -887,7 +928,7 @@ window.TY = (() => {
   }
   function back() {
     if (state.screen === "tyc") leaveCarton();
-    const up = { ty: "home", tya: "ty", tys: "ty", tyc: ui.ship ? "tys/" + ui.ship.id : "ty" }[state.screen];
+    const up = { ty: "home", tya: "ty", tys: ui.view && ui.ship ? "tys/" + ui.ship.id : "ty", tyc: ui.ship ? shipUrl() : "ty" }[state.screen];
     if (up) A.go(up);
   }
   function scan(raw) {
